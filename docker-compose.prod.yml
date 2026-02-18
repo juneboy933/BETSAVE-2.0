@@ -1,0 +1,99 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: betsave-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+
+  redis:
+    image: redis:7-alpine
+    container_name: betsave-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  backend-api:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: betsave-backend-api
+    restart: unless-stopped
+    environment:
+      PORT: 5000
+      MONGO_URI: mongodb://mongo:27017/betsave
+      REDIS_URI: redis://redis:6379
+      SAVINGS_PERCENTAGE: 0.1
+      ADMIN_DASHBOARD_TOKEN: change_me
+      BANK_API_URL: ""
+      BANK_API_KEY: ""
+      BANK_SETTLEMENT_ACCOUNT: ""
+    depends_on:
+      - mongo
+      - redis
+    ports:
+      - "5000:5000"
+
+  event-worker:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: betsave-event-worker
+    restart: unless-stopped
+    command: npm run worker:event
+    environment:
+      MONGO_URI: mongodb://mongo:27017/betsave
+      REDIS_URI: redis://redis:6379
+      SAVINGS_PERCENTAGE: 0.1
+    depends_on:
+      - mongo
+      - redis
+
+  webhook-worker:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: betsave-webhook-worker
+    restart: unless-stopped
+    command: npm run worker:webhook
+    environment:
+      MONGO_URI: mongodb://mongo:27017/betsave
+      REDIS_URI: redis://redis:6379
+    depends_on:
+      - mongo
+      - redis
+
+  partner-frontend:
+    build:
+      context: ./PartnerFrontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:5000
+    container_name: betsave-partner-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:5000
+    depends_on:
+      - backend-api
+    ports:
+      - "5181:5181"
+
+  admin-frontend:
+    build:
+      context: ./AdminFrontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:5000
+    container_name: betsave-admin-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:5000
+    depends_on:
+      - backend-api
+    ports:
+      - "5182:5182"
+
+volumes:
+  mongo_data:

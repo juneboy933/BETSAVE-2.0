@@ -191,3 +191,54 @@ npm run dev
 - Use a process manager (PM2/systemd/container orchestration).
 - Store `apiSecret` and admin tokens securely.
 - Keep webhook retries and dead-letter monitoring enabled.
+
+## Deploy With Docker (Recommended Quick Start)
+
+This repo includes:
+
+- `Backend/Dockerfile`
+- `PartnerFrontend/Dockerfile`
+- `AdminFrontend/Dockerfile`
+- `docker-compose.prod.yml`
+
+### 1. Build and run everything
+
+```powershell
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+### 2. Access services
+
+- Partner frontend: `http://localhost:5181`
+- Admin frontend: `http://localhost:5182`
+- Backend API: `http://localhost:5000`
+
+### 3. Stop
+
+```powershell
+docker compose -f docker-compose.prod.yml down
+```
+
+### 4. Stop and remove persisted Mongo data
+
+```powershell
+docker compose -f docker-compose.prod.yml down -v
+```
+
+## Deploy To Cloud VM
+
+1. Provision a Linux VM (Ubuntu/Debian).
+2. Install Docker + Docker Compose plugin.
+3. Clone this repo.
+4. Edit `docker-compose.prod.yml` env values:
+   - `ADMIN_DASHBOARD_TOKEN`
+   - `SAVINGS_PERCENTAGE`
+   - `BANK_*` values
+   - set frontend API URL to your public backend URL
+5. Run:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+6. Put Nginx/Caddy in front for HTTPS + domain routing.

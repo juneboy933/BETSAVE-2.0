@@ -5,7 +5,9 @@
   "main": "app/server.js",
   "scripts": {
     "start": "node app/server.js",
-    "dev": "nodemon app/server.js"
+    "dev": "nodemon app/server.js",
+    "worker:event": "node worker/event.worker.js",
+    "worker:webhook": "node worker/webhook.worker.js"
   },
   "keywords": [],
   "author": "",
