@@ -1,0 +1,141 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-100 text-ink;
+  font-family: var(--font-body), ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading), var(--font-body), ui-sans-serif, system-ui;
+}
+
+.brand-logo {
+  @apply grid h-10 w-10 place-items-center rounded-xl bg-brand font-bold text-white shadow-md shadow-brand/30;
+}
+
+.brand-lockup {
+  @apply flex items-center gap-3;
+}
+
+.brand-title {
+  @apply text-base font-semibold text-slate-900;
+}
+
+.brand-subtitle {
+  @apply text-xs text-slate-500;
+}
+
+.nav-shell {
+  @apply flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm;
+}
+
+.public-shell {
+  @apply flex min-h-[calc(100vh-3rem)] flex-col;
+}
+
+.public-main {
+  @apply flex flex-1 items-center justify-center py-8;
+}
+
+.public-center {
+  @apply w-full max-w-4xl rounded-3xl border border-slate-200 bg-white px-6 py-12 text-center shadow-sm sm:px-10;
+}
+
+.public-headline {
+  @apply text-4xl font-bold leading-tight text-slate-900 sm:text-6xl;
+}
+
+.public-tagline {
+  @apply mx-auto mt-4 max-w-2xl text-base text-slate-600 sm:text-lg;
+}
+
+.public-actions {
+  @apply mt-8 flex flex-wrap items-center justify-center gap-3;
+}
+
+.auth-shell {
+  @apply flex min-h-[calc(100vh-3rem)] flex-col;
+}
+
+.auth-main {
+  @apply flex flex-1 items-center justify-center py-8;
+}
+
+.auth-card {
+  @apply w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8;
+}
+
+.card {
+  @apply rounded-2xl border border-slate-200 bg-white p-5 shadow-sm;
+}
+
+.label {
+  @apply mb-1 mt-3 block text-sm font-semibold text-slate-600 tracking-wide;
+}
+
+.input {
+  @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-brand/20 focus:ring-2;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand/90;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700;
+}
+
+.table-wrap {
+  @apply overflow-x-auto rounded-xl border border-slate-200;
+}
+
+.table {
+  @apply min-w-full border-separate text-sm;
+  border-spacing: 0 8px;
+}
+
+.table th {
+  @apply bg-slate-50 px-4 py-3 text-left font-semibold uppercase tracking-wide text-slate-700;
+}
+
+.table td {
+  @apply px-4 py-3 text-slate-700;
+}
+
+.dashboard-shell {
+  @apply flex min-h-[calc(100vh-3rem)] flex-col;
+}
+
+.dashboard-body {
+  @apply grid flex-1 gap-4 py-4 lg:grid-cols-[250px_1fr];
+}
+
+.sidebar {
+  @apply h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-sm;
+}
+
+.sidebar-link {
+  @apply block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100;
+}
+
+.sidebar-link.active {
+  @apply bg-brand text-white hover:bg-brand;
+}
+
+.kpi-grid {
+  @apply mt-4 grid gap-3 sm:grid-cols-3;
+}
+
+.kpi-tile {
+  @apply rounded-xl border border-slate-200 bg-slate-50 p-3;
+}
+
+.site-footer {
+  @apply mt-6 border-t border-slate-200 py-4 text-center text-sm text-slate-500;
+}
+

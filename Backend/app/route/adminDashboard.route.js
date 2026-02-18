@@ -1,0 +1,24 @@
+import express from "express";
+import {
+    getAdminOverview,
+    getAdminPartners,
+    getAdminUsers,
+    getAdminEvents,
+    getAdminSavings,
+    getAdminOperations,
+    updatePartnerStatus
+} from "../controller/adminDashboard.controller.js";
+import { verifyAdmin } from "../middleware/adminAuth.middleware.js";
+
+const router = express.Router();
+
+router.use(verifyAdmin);
+router.get("/overview", getAdminOverview);
+router.get("/partners", getAdminPartners);
+router.get("/users", getAdminUsers);
+router.get("/events", getAdminEvents);
+router.get("/savings", getAdminSavings);
+router.get("/operations", getAdminOperations);
+router.patch("/partners/:partnerId/status", updatePartnerStatus);
+
+export default router;
