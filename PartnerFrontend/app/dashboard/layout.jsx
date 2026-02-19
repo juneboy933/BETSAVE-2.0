@@ -18,6 +18,12 @@ export default function PartnerDashboardLayout({ children }) {
   const [partnerName, setPartnerName] = useState("");
   const [stats, setStats] = useState({ totalWalletBalance: 0, totalUsers: 0, totalEvents: 0, totalProcessedAmount: 0 });
   const toPositiveNumber = (value) => Math.max(0, Number(value) || 0);
+  const displayPartnerName = (() => {
+    if (partnerName) return partnerName;
+    const { apiKey } = getPartnerCreds();
+    const inferred = String(apiKey || "").split("_")[0].replace(/_/g, " ").trim();
+    return inferred || "Unknown Partner";
+  })();
 
   useEffect(() => {
     if (!hasPartnerCreds()) {
@@ -81,7 +87,7 @@ export default function PartnerDashboardLayout({ children }) {
 
       <section className="rounded-xl border border-slate-200 bg-white px-4 py-3">
         <p className="text-xs uppercase tracking-wide text-slate-500">Logged In Partner</p>
-        <p className="text-lg font-bold text-slate-900">{partnerName || "Partner account"}</p>
+        <p className="text-lg font-bold text-slate-900">{displayPartnerName}</p>
       </section>
 
       <section className="kpi-grid">
