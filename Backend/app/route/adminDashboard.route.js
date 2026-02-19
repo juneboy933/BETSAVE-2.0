@@ -1,6 +1,7 @@
 import express from "express";
 import {
     activateUser,
+    getAdminPartnerDetails,
     getAdminOverview,
     getAdminPartners,
     getAdminUserSavingsBreakdown,
@@ -19,6 +20,7 @@ const router = express.Router();
 router.use(verifyAdmin);
 router.get("/overview", getAdminOverview);
 router.get("/partners", getAdminPartners);
+router.get("/partners/:partnerId/details", getAdminPartnerDetails);
 router.get("/users", getAdminUsers);
 router.get("/users/:userId/savings-breakdown", getAdminUserSavingsBreakdown);
 router.get("/events", getAdminEvents);

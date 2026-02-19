@@ -147,6 +147,86 @@ export const getAdminPartners = async (req, res) => {
     }
 };
 
+export const getAdminPartnerDetails = async (req, res) => {
+    try {
+        const { partnerId } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(partnerId)) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "Invalid partner id"
+            });
+        }
+
+        const objectPartnerId = new mongoose.Types.ObjectId(partnerId);
+        const partner = await Partner.findById(objectPartnerId)
+            .select("_id name status webhookUrl createdAt updatedAt")
+            .lean();
+
+        if (!partner) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "Partner not found"
+            });
+        }
+
+        const [eventStats, partnerUsers, savingsAgg, recentEvents] = await Promise.all([
+            Event.aggregate([
+                { $match: { partnerName: partner.name } },
+                {
+                    $group: {
+                        _id: "$status",
+                        count: { $sum: 1 },
+                        totalAmount: { $sum: "$amount" }
+                    }
+                }
+            ]),
+            PartnerUser.countDocuments({ partnerId: objectPartnerId }),
+            Ledger.aggregate([
+                { $match: { account: "USER_SAVINGS" } },
+                {
+                    $lookup: {
+                        from: "events",
+                        localField: "eventId",
+                        foreignField: "eventId",
+                        as: "event"
+                    }
+                },
+                { $unwind: "$event" },
+                { $match: { "event.partnerName": partner.name } },
+                {
+                    $group: {
+                        _id: null,
+                        totalSavings: { $sum: "$amount" },
+                        entries: { $sum: 1 }
+                    }
+                }
+            ]),
+            Event.find({ partnerName: partner.name })
+                .sort({ createdAt: -1 })
+                .limit(10)
+                .select("eventId phone status amount createdAt")
+                .lean()
+        ]);
+
+        return res.json({
+            status: "SUCCESS",
+            partner,
+            stats: eventStats,
+            partnerUsers,
+            savings: {
+                totalSavings: clampNonNegative(savingsAgg[0]?.totalSavings),
+                entries: savingsAgg[0]?.entries || 0
+            },
+            recentEvents
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
 export const getAdminUsers = async (req, res) => {
     try {
         const { page, limit } = parsePagination(req.query);
@@ -675,33 +755,88 @@ export const getAdminEvents = async (req, res) => {
 
 export const getAdminSavings = async (_req, res) => {
     try {
+        const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
+        const safeSavingsPercentage =
+            Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
+                ? savingsPercentage
+                : 0.1;
+
+        const eventSavingsPipeline = [
+            {
+                $lookup: {
+                    from: "ledgers",
+                    let: { eventIdentifier: "$eventId" },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $and: [
+                                        { $eq: ["$eventId", "$$eventIdentifier"] },
+                                        { $eq: ["$account", "USER_SAVINGS"] }
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                totalSavings: { $sum: "$amount" }
+                            }
+                        }
+                    ],
+                    as: "ledgerSavings"
+                }
+            },
+            {
+                $addFields: {
+                    ledgerSavings: { $ifNull: [{ $arrayElemAt: ["$ledgerSavings.totalSavings", 0] }, null] }
+                }
+            },
+            {
+                $addFields: {
+                    savingsAmount: {
+                        $cond: [
+                            { $ne: ["$ledgerSavings", null] },
+                            "$ledgerSavings",
+                            {
+                                $cond: [
+                                    { $ne: ["$status", "FAILED"] },
+                                    { $round: [{ $multiply: [{ $ifNull: ["$amount", 0] }, safeSavingsPercentage] }, 0] },
+                                    0
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        ];
+
         const [summary, byPartner, latestLedger] = await Promise.all([
-            Ledger.aggregate([
-                { $match: { account: "USER_SAVINGS" } },
+            Event.aggregate([
+                ...eventSavingsPipeline,
                 {
                     $group: {
                         _id: null,
-                        totalSavings: { $sum: "$amount" },
-                        totalEntries: { $sum: 1 }
+                        totalSavings: { $sum: "$savingsAmount" },
+                        totalEntries: {
+                            $sum: {
+                                $cond: [{ $gt: ["$savingsAmount", 0] }, 1, 0]
+                            }
+                        }
                     }
                 }
             ]),
-            Ledger.aggregate([
-                { $match: { account: "USER_SAVINGS" } },
-                {
-                    $lookup: {
-                        from: "events",
-                        localField: "eventId",
-                        foreignField: "eventId",
-                        as: "event"
-                    }
-                },
-                { $unwind: "$event" },
+            Event.aggregate([
+                ...eventSavingsPipeline,
                 {
                     $group: {
-                        _id: "$event.partnerName",
-                        totalSavings: { $sum: "$amount" },
-                        entries: { $sum: 1 }
+                        _id: "$partnerName",
+                        totalSavings: { $sum: "$savingsAmount" },
+                        entries: {
+                            $sum: {
+                                $cond: [{ $gt: ["$savingsAmount", 0] }, 1, 0]
+                            }
+                        }
                     }
                 },
                 { $sort: { totalSavings: -1 } }

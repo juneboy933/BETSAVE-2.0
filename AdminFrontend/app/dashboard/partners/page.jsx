@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getAdminToken, request } from "../../../lib/api";
 
 export default function AdminDashboardPartners() {
+  const router = useRouter();
   const [partners, setPartners] = useState([]);
-  const [form, setForm] = useState({ partnerId: "", status: "SUSPENDED" });
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   const refresh = async () => {
@@ -21,37 +21,6 @@ export default function AdminDashboardPartners() {
     }
   };
 
-  const update = async () => {
-    try {
-      setError("");
-      const result = await request(`/api/v1/dashboard/admin/partners/${form.partnerId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "x-admin-token": getAdminToken() },
-        body: JSON.stringify({ status: form.status })
-      });
-      setMessage(`Updated ${result.partner.name} to ${result.partner.status}`);
-      await refresh();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const quickUpdate = async (partnerId, status) => {
-    setForm({ partnerId, status });
-    try {
-      setError("");
-      const result = await request(`/api/v1/dashboard/admin/partners/${partnerId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "x-admin-token": getAdminToken() },
-        body: JSON.stringify({ status })
-      });
-      setMessage(`Updated ${result.partner.name} to ${result.partner.status}`);
-      await refresh();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
   useEffect(() => {
     refresh();
     const intervalId = setInterval(refresh, 10000);
@@ -60,21 +29,12 @@ export default function AdminDashboardPartners() {
 
   return (
     <article className="card space-y-3">
-      <h2 className="text-lg font-bold">Partner Governance</h2>
-      <div className="grid gap-2 md:grid-cols-[1fr_220px_auto_auto]">
-        <input className="input" placeholder="Partner ID" value={form.partnerId} onChange={(e) => setForm({ ...form, partnerId: e.target.value })} />
-        <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-          <option value="SUSPENDED">SUSPENDED</option>
-          <option value="ACTIVE">ACTIVE</option>
-        </select>
-        <button className="btn" onClick={update}>
-          Update
-        </button>
-        <button className="btn-secondary" onClick={refresh}>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold">Partner Governance</h2>
+        <button className="btn" onClick={refresh}>
           Refresh
         </button>
       </div>
-      {message && <p className="text-sm font-semibold text-emerald-700">{message}</p>}
       {error && <p className="text-sm font-semibold text-red-700">{error}</p>}
 
       <div className="table-wrap">
@@ -87,7 +47,7 @@ export default function AdminDashboardPartners() {
               <th>Webhook</th>
               <th>Total Events</th>
               <th>Total Amount</th>
-              <th>Actions</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -100,14 +60,9 @@ export default function AdminDashboardPartners() {
                 <td>{p.stats?.totalEvents || 0}</td>
                 <td>{p.stats?.totalAmount || 0}</td>
                 <td>
-                  <div className="flex flex-wrap gap-2">
-                    <button className="btn-secondary" onClick={() => quickUpdate(p._id, "ACTIVE")}>
-                      Activate
-                    </button>
-                    <button className="btn" onClick={() => quickUpdate(p._id, "SUSPENDED")}>
-                      Suspend
-                    </button>
-                  </div>
+                  <button className="btn" onClick={() => router.push(`/dashboard/partners/${p._id}`)}>
+                    Manage
+                  </button>
                 </td>
               </tr>
             ))}
