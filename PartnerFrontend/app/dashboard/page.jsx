@@ -5,11 +5,11 @@ import { getPartnerCreds, setPartnerCreds, signedRequest } from "../../lib/api";
 
 export default function PartnerDashboardOverview() {
   const [rows, setRows] = useState([]);
-  const [notifications, setNotifications] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalRows, setTotalRows] = useState(0);
   const [credentials, setCredentials] = useState({ apiKey: "", apiSecret: "" });
   const [credentialsMessage, setCredentialsMessage] = useState("");
   const [error, setError] = useState("");
-  const [notificationsError, setNotificationsError] = useState("");
   const [credentialsError, setCredentialsError] = useState("");
   const statusClass = (status) =>
     status === "PROCESSED"
@@ -29,12 +29,13 @@ export default function PartnerDashboardOverview() {
       const creds = getPartnerCreds();
       const data = await signedRequest({
         method: "GET",
-        path: "/api/v1/dashboard/partner/events?page=1&limit=20",
+        path: `/api/v1/dashboard/partner/events?page=${currentPage}&limit=10`,
         body: {},
         apiKey: creds.apiKey,
         apiSecret: creds.apiSecret
       });
       setRows(data.events || []);
+      setTotalRows(Number(data.total) || 0);
     } catch (err) {
       setError(err.message);
     }
@@ -63,23 +64,6 @@ export default function PartnerDashboardOverview() {
     }
   };
 
-  const loadNotifications = async () => {
-    try {
-      setNotificationsError("");
-      const creds = getPartnerCreds();
-      const data = await signedRequest({
-        method: "GET",
-        path: "/api/v1/dashboard/partner/notifications?page=1&limit=20",
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
-      });
-      setNotifications(data.notifications || []);
-    } catch (err) {
-      setNotificationsError(err.message);
-    }
-  };
-
   useEffect(() => {
     const storedCreds = getPartnerCreds();
     setCredentials(storedCreds);
@@ -89,14 +73,13 @@ export default function PartnerDashboardOverview() {
       sessionStorage.removeItem("partner_security_notice");
     }
     load();
-    loadNotifications();
     const intervalId = setInterval(load, 10000);
-    const notificationsIntervalId = setInterval(loadNotifications, 15000);
     return () => {
       clearInterval(intervalId);
-      clearInterval(notificationsIntervalId);
     };
-  }, []);
+  }, [currentPage]);
+
+  const totalPages = Math.max(1, Math.ceil(totalRows / 10));
 
   return (
     <article className="card">
@@ -138,6 +121,21 @@ export default function PartnerDashboardOverview() {
           </tbody>
         </table>
       </div>
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <button className="btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+          Previous
+        </button>
+        <p className="text-xs font-medium text-slate-500">
+          Page {currentPage} of {totalPages}
+        </p>
+        <button
+          className="btn"
+          disabled={currentPage >= totalPages}
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+        >
+          Next
+        </button>
+      </div>
 
       <article className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -154,26 +152,6 @@ export default function PartnerDashboardOverview() {
         <label className="label">API Secret</label>
         <input className="input" value={credentials.apiSecret} readOnly />
         {credentialsError && <p className="mt-2 text-sm font-semibold text-red-700">{credentialsError}</p>}
-      </article>
-
-      <article className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-bold text-slate-900">Admin Notifications</h3>
-          <button className="btn-secondary" onClick={loadNotifications}>
-            Refresh Notifications
-          </button>
-        </div>
-        {notificationsError && <p className="mb-2 text-sm font-semibold text-red-700">{notificationsError}</p>}
-        <div className="space-y-2">
-          {notifications.map((item) => (
-            <article key={item._id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="font-semibold text-slate-900">{item.title}</p>
-              <p className="text-sm text-slate-700">{item.message}</p>
-              <p className="mt-1 text-xs text-slate-500">{new Date(item.createdAt).toLocaleString()}</p>
-            </article>
-          ))}
-          {notifications.length === 0 && <p className="text-sm text-slate-500">No notifications yet.</p>}
-        </div>
       </article>
     </article>
   );

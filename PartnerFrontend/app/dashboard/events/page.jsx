@@ -9,6 +9,8 @@ export default function PartnerDashboardEvents() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [filters, setFilters] = useState({ status: "ALL", eventId: "", phone: "" });
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
   const statusClass = (status) =>
     status === "PROCESSED"
       ? "bg-emerald-50 text-emerald-800 font-semibold"
@@ -61,6 +63,10 @@ export default function PartnerDashboardEvents() {
     return () => clearInterval(intervalId);
   }, [filters.status]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, events.length]);
+
   const filteredEvents = events
     .filter((event) => {
       if (filters.eventId.trim() && !String(event.eventId || "").toLowerCase().includes(filters.eventId.trim().toLowerCase())) {
@@ -72,6 +78,8 @@ export default function PartnerDashboardEvents() {
       return true;
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const totalPages = Math.max(1, Math.ceil(filteredEvents.length / pageSize));
+  const pagedEvents = filteredEvents.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <article className="card space-y-3">
@@ -133,7 +141,7 @@ export default function PartnerDashboardEvents() {
             </tr>
           </thead>
           <tbody>
-            {filteredEvents.map((e) => (
+            {pagedEvents.map((e) => (
               <tr key={e._id}>
                 <td>{e.eventId}</td>
                 <td className={statusClass(e.status)}>{e.status}</td>
@@ -142,7 +150,7 @@ export default function PartnerDashboardEvents() {
                 <td>{new Date(e.createdAt).toLocaleString()}</td>
               </tr>
             ))}
-            {filteredEvents.length === 0 && (
+            {pagedEvents.length === 0 && (
               <tr>
                 <td colSpan={5} className="text-center text-slate-500">
                   No events loaded.
@@ -151,6 +159,21 @@ export default function PartnerDashboardEvents() {
             )}
           </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <button className="btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+          Previous
+        </button>
+        <p className="text-xs font-medium text-slate-500">
+          Page {currentPage} of {totalPages}
+        </p>
+        <button
+          className="btn"
+          disabled={currentPage >= totalPages}
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+        >
+          Next
+        </button>
       </div>
     </article>
   );

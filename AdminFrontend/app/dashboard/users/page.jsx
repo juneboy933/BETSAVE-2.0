@@ -9,6 +9,8 @@ export default function AdminDashboardUsers() {
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
   const [filters, setFilters] = useState({ phone: "", status: "ALL", partner: "" });
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   const filteredUsers = useMemo(() => {
     const phoneNeedle = filters.phone.trim().toLowerCase();
@@ -33,6 +35,13 @@ export default function AdminDashboardUsers() {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
   }, [users, filters]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, users.length]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const pagedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const refresh = async () => {
     try {
@@ -101,7 +110,7 @@ export default function AdminDashboardUsers() {
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.map((u) => (
+            {pagedUsers.map((u) => (
               <tr key={u._id}>
                 <td>{u.phoneNumber}</td>
                 <td>{u.status}</td>
@@ -115,7 +124,7 @@ export default function AdminDashboardUsers() {
                 </td>
               </tr>
             ))}
-            {filteredUsers.length === 0 && (
+            {pagedUsers.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center text-slate-500">
                   No users loaded.
@@ -124,6 +133,21 @@ export default function AdminDashboardUsers() {
             )}
           </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <button className="btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+          Previous
+        </button>
+        <p className="text-xs font-medium text-slate-500">
+          Page {currentPage} of {totalPages}
+        </p>
+        <button
+          className="btn"
+          disabled={currentPage >= totalPages}
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+        >
+          Next
+        </button>
       </div>
     </article>
   );

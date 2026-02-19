@@ -9,13 +9,15 @@ const navLinks = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/users", label: "Users" },
   { href: "/dashboard/events", label: "Events" },
-  { href: "/dashboard/analytics", label: "Analytics" }
+  { href: "/dashboard/analytics", label: "Analytics" },
+  { href: "/dashboard/notifications", label: "Notifications" }
 ];
 
 export default function PartnerDashboardLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const [partnerName, setPartnerName] = useState("");
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [stats, setStats] = useState({ totalWalletBalance: 0, totalUsers: 0, totalEvents: 0, totalProcessedAmount: 0 });
   const toPositiveNumber = (value) => Math.max(0, Number(value) || 0);
   const displayPartnerName = (() => {
@@ -34,7 +36,7 @@ export default function PartnerDashboardLayout({ children }) {
     const load = async () => {
       try {
         const creds = getPartnerCreds();
-        const [a, u] = await Promise.all([
+        const [a, u, n] = await Promise.all([
           signedRequest({
             method: "GET",
             path: "/api/v1/dashboard/partner/analytics",
@@ -48,6 +50,13 @@ export default function PartnerDashboardLayout({ children }) {
             body: {},
             apiKey: creds.apiKey,
             apiSecret: creds.apiSecret
+          }),
+          signedRequest({
+            method: "GET",
+            path: "/api/v1/dashboard/partner/notifications/summary",
+            body: {},
+            apiKey: creds.apiKey,
+            apiSecret: creds.apiSecret
           })
         ]);
         const processedEvents = (a.stat || []).find((item) => item._id === "PROCESSED")?.count || 0;
@@ -57,6 +66,7 @@ export default function PartnerDashboardLayout({ children }) {
           totalEvents: toPositiveNumber(processedEvents),
           totalProcessedAmount: toPositiveNumber(a.totalProcessedAmount)
         });
+        setUnreadNotifications(toPositiveNumber(n.unreadCount));
       } catch {}
     };
     load();
@@ -115,7 +125,12 @@ export default function PartnerDashboardLayout({ children }) {
           <nav className="space-y-2">
             {navLinks.map((n) => (
               <Link key={n.href} href={n.href} className={`sidebar-link ${pathname === n.href ? "active" : ""}`}>
-                {n.label}
+                <span className="flex items-center justify-between">
+                  <span>{n.label}</span>
+                  {n.href === "/dashboard/notifications" && unreadNotifications > 0 ? (
+                    <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  ) : null}
+                </span>
               </Link>
             ))}
           </nav>

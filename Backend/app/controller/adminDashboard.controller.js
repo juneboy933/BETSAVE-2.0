@@ -765,6 +765,40 @@ export const getAdminNotifications = async (req, res) => {
     }
 };
 
+export const getAdminNotificationSummary = async (_req, res) => {
+    try {
+        const unreadCount = await AdminNotification.countDocuments({ read: { $ne: true } });
+        return res.json({
+            status: "SUCCESS",
+            unreadCount
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const markAdminNotificationsRead = async (_req, res) => {
+    try {
+        const result = await AdminNotification.updateMany(
+            { read: { $ne: true } },
+            { $set: { read: true, readAt: new Date() } }
+        );
+
+        return res.json({
+            status: "SUCCESS",
+            updated: result.modifiedCount || 0
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
 export const getAdminEvents = async (req, res) => {
     try {
         const { page, limit } = parsePagination(req.query);

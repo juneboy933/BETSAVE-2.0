@@ -7,6 +7,8 @@ export default function AdminDashboardEvents() {
   const [events, setEvents] = useState([]);
   const [error, setError] = useState("");
   const [filters, setFilters] = useState({ status: "ALL", partner: "", phone: "" });
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
   const statusClass = (status) =>
     status === "PROCESSED"
       ? "bg-emerald-50 text-emerald-800 font-semibold"
@@ -39,6 +41,13 @@ export default function AdminDashboardEvents() {
     const intervalId = setInterval(refresh, 10000);
     return () => clearInterval(intervalId);
   }, [filters.status, filters.partner, filters.phone]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, events.length]);
+
+  const totalPages = Math.max(1, Math.ceil(events.length / pageSize));
+  const pagedEvents = events.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <article className="card space-y-3">
@@ -90,7 +99,7 @@ export default function AdminDashboardEvents() {
             </tr>
           </thead>
           <tbody>
-            {events.map((e) => (
+            {pagedEvents.map((e) => (
               <tr key={e._id}>
                 <td>{e.eventId}</td>
                 <td>{e.partnerName}</td>
@@ -100,7 +109,7 @@ export default function AdminDashboardEvents() {
                 <td className={amountClass(e.savingsAmount)}>{amountLabel(e.savingsAmount)}</td>
               </tr>
             ))}
-            {events.length === 0 && (
+            {pagedEvents.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center text-slate-500">
                   No events loaded.
@@ -109,6 +118,21 @@ export default function AdminDashboardEvents() {
             )}
           </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <button className="btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+          Previous
+        </button>
+        <p className="text-xs font-medium text-slate-500">
+          Page {currentPage} of {totalPages}
+        </p>
+        <button
+          className="btn"
+          disabled={currentPage >= totalPages}
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+        >
+          Next
+        </button>
       </div>
     </article>
   );

@@ -3,6 +3,7 @@
 const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 
 const normalizeApiBase = (value) => (value || DEFAULT_API).trim().replace(/\/+$/, "");
+const canUseStorage = () => typeof window !== "undefined" && typeof localStorage !== "undefined";
 
 function buildRequestUrl(path) {
   const base = normalizeApiBase(getApiBase());
@@ -10,15 +11,19 @@ function buildRequestUrl(path) {
   return `${base}${safePath}`;
 }
 
-export const getApiBase = () => normalizeApiBase(localStorage.getItem("partner_api_base") || DEFAULT_API);
-export const setApiBase = (value) => localStorage.setItem("partner_api_base", normalizeApiBase(value));
+export const getApiBase = () =>
+  normalizeApiBase((canUseStorage() ? localStorage.getItem("partner_api_base") : null) || DEFAULT_API);
+export const setApiBase = (value) => {
+  if (!canUseStorage()) return;
+  localStorage.setItem("partner_api_base", normalizeApiBase(value));
+};
 
 export const getPartnerCreds = () => ({
-  apiKey: localStorage.getItem("partner_api_key") || "",
-  apiSecret: localStorage.getItem("partner_api_secret") || ""
+  apiKey: canUseStorage() ? localStorage.getItem("partner_api_key") || "" : "",
+  apiSecret: canUseStorage() ? localStorage.getItem("partner_api_secret") || "" : ""
 });
 
-export const getPartnerName = () => localStorage.getItem("partner_name") || "";
+export const getPartnerName = () => (canUseStorage() ? localStorage.getItem("partner_name") || "" : "");
 
 export const hasPartnerCreds = () => {
   const { apiKey, apiSecret } = getPartnerCreds();
@@ -26,11 +31,13 @@ export const hasPartnerCreds = () => {
 };
 
 export const setPartnerCreds = ({ apiKey, apiSecret }) => {
+  if (!canUseStorage()) return;
   localStorage.setItem("partner_api_key", apiKey.trim());
   localStorage.setItem("partner_api_secret", apiSecret.trim());
 };
 
 export const setPartnerName = (name) => {
+  if (!canUseStorage()) return;
   const safeName = String(name || "").trim();
   if (!safeName) {
     localStorage.removeItem("partner_name");
@@ -40,6 +47,7 @@ export const setPartnerName = (name) => {
 };
 
 export const clearPartnerCreds = () => {
+  if (!canUseStorage()) return;
   localStorage.removeItem("partner_api_key");
   localStorage.removeItem("partner_api_secret");
   localStorage.removeItem("partner_name");

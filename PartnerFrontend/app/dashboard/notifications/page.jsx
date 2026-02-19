@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAdminToken, request } from "../../../lib/api";
+import { getPartnerCreds, signedRequest } from "../../../lib/api";
 
-export default function AdminDashboardNotifications() {
+export default function PartnerDashboardNotifications() {
   const [notifications, setNotifications] = useState([]);
   const [error, setError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -13,12 +13,22 @@ export default function AdminDashboardNotifications() {
   const load = async () => {
     try {
       setError("");
-      const headers = { "x-admin-token": getAdminToken() };
-      await request("/api/v1/dashboard/admin/notifications/read-all", {
+      const creds = getPartnerCreds();
+      await signedRequest({
         method: "PATCH",
-        headers
+        path: "/api/v1/dashboard/partner/notifications/read-all",
+        body: {},
+        apiKey: creds.apiKey,
+        apiSecret: creds.apiSecret
       });
-      const data = await request(`/api/v1/dashboard/admin/notifications?page=${currentPage}&limit=${pageSize}`, { headers });
+
+      const data = await signedRequest({
+        method: "GET",
+        path: `/api/v1/dashboard/partner/notifications?page=${currentPage}&limit=${pageSize}`,
+        body: {},
+        apiKey: creds.apiKey,
+        apiSecret: creds.apiSecret
+      });
       setNotifications(data.notifications || []);
       setTotal(Number(data.total) || 0);
     } catch (err) {
@@ -50,8 +60,7 @@ export default function AdminDashboardNotifications() {
             <tr>
               <th>Title</th>
               <th>Message</th>
-              <th>Action</th>
-              <th>Actor</th>
+              <th>Type</th>
               <th>Created</th>
             </tr>
           </thead>
@@ -60,14 +69,13 @@ export default function AdminDashboardNotifications() {
               <tr key={item._id}>
                 <td>{item.title}</td>
                 <td>{item.message}</td>
-                <td>{item.action}</td>
-                <td>{item.actorName || "Admin"}</td>
+                <td>{item.type}</td>
                 <td>{new Date(item.createdAt).toLocaleString()}</td>
               </tr>
             ))}
             {notifications.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-slate-500">
+                <td colSpan={4} className="text-center text-slate-500">
                   No notifications loaded.
                 </td>
               </tr>

@@ -19,6 +19,7 @@ export default function AdminDashboardLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const [stats, setStats] = useState({ totalWalletBalance: 0, totalUsers: 0, totalEvents: 0 });
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const toPositiveNumber = (value) => Math.max(0, Number(value) || 0);
 
   useEffect(() => {
@@ -29,12 +30,16 @@ export default function AdminDashboardLayout({ children }) {
     const load = async () => {
       try {
         const headers = { "x-admin-token": getAdminToken() };
-        const overview = await request("/api/v1/dashboard/admin/overview", { headers });
+        const [overview, notifications] = await Promise.all([
+          request("/api/v1/dashboard/admin/overview", { headers }),
+          request("/api/v1/dashboard/admin/notifications/summary", { headers })
+        ]);
         setStats({
           totalWalletBalance: toPositiveNumber(overview.metrics?.totalWalletBalance),
           totalUsers: toPositiveNumber(overview.metrics?.totalUsers),
           totalEvents: toPositiveNumber(overview.metrics?.totalEvents)
         });
+        setUnreadNotifications(toPositiveNumber(notifications.unreadCount));
       } catch {}
     };
     load();
@@ -84,7 +89,12 @@ export default function AdminDashboardLayout({ children }) {
           <nav className="space-y-2">
             {navLinks.map((n) => (
               <Link key={n.href} href={n.href} className={`sidebar-link ${pathname === n.href ? "active" : ""}`}>
-                {n.label}
+                <span className="flex items-center justify-between">
+                  <span>{n.label}</span>
+                  {n.href === "/dashboard/notifications" && unreadNotifications > 0 ? (
+                    <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  ) : null}
+                </span>
               </Link>
             ))}
           </nav>

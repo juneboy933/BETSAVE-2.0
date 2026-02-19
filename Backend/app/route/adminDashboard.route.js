@@ -2,6 +2,7 @@ import express from "express";
 import {
     activateUser,
     getAdminPartnerDetails,
+    getAdminNotificationSummary,
     getAdminOverview,
     getAdminPartners,
     getAdminUserSavingsBreakdown,
@@ -10,6 +11,7 @@ import {
     getAdminNotifications,
     getAdminSavings,
     getAdminOperations,
+    markAdminNotificationsRead,
     suspendUser,
     updatePartnerStatus
 } from "../controller/adminDashboard.controller.js";
@@ -25,6 +27,8 @@ router.get("/users", getAdminUsers);
 router.get("/users/:userId/savings-breakdown", getAdminUserSavingsBreakdown);
 router.get("/events", getAdminEvents);
 router.get("/notifications", getAdminNotifications);
+router.get("/notifications/summary", getAdminNotificationSummary);
+router.patch("/notifications/read-all", markAdminNotificationsRead);
 router.get("/savings", getAdminSavings);
 router.get("/operations", getAdminOperations);
 router.patch("/partners/:partnerId/status", updatePartnerStatus);

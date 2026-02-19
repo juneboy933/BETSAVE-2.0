@@ -9,6 +9,8 @@ export default function PartnerDashboardAnalytics() {
   const [totalProcessedAmount, setTotalProcessedAmount] = useState(0);
   const [behavior, setBehavior] = useState([]);
   const [error, setError] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
   const toPositiveNumber = (value) => Math.max(0, Number(value) || 0);
   const amountClass = (value) =>
     Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
@@ -48,6 +50,13 @@ export default function PartnerDashboardAnalytics() {
     const intervalId = setInterval(load, 10000);
     return () => clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [behavior.length]);
+
+  const totalPages = Math.max(1, Math.ceil(behavior.length / pageSize));
+  const pagedBehavior = behavior.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <section className="space-y-4">
@@ -108,7 +117,7 @@ export default function PartnerDashboardAnalytics() {
               </tr>
             </thead>
             <tbody>
-              {behavior.map((u) => (
+              {pagedBehavior.map((u) => (
                 <tr key={u.userId}>
                   <td>{u.phoneNumber || "-"}</td>
                   <td className={amountClass(u.totalSaved)}>{amountLabel(u.totalSaved)}</td>
@@ -116,7 +125,7 @@ export default function PartnerDashboardAnalytics() {
                   <td>{new Date(u.lastSavedAt).toLocaleString()}</td>
                 </tr>
               ))}
-              {behavior.length === 0 && (
+              {pagedBehavior.length === 0 && (
                 <tr>
                   <td colSpan={4} className="text-center text-slate-500">
                     No behavior data loaded.
@@ -125,6 +134,21 @@ export default function PartnerDashboardAnalytics() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="mt-3 flex items-center justify-end gap-2">
+          <button className="btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+            Previous
+          </button>
+          <p className="text-xs font-medium text-slate-500">
+            Page {currentPage} of {totalPages}
+          </p>
+          <button
+            className="btn"
+            disabled={currentPage >= totalPages}
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+          >
+            Next
+          </button>
         </div>
       </article>
     </section>

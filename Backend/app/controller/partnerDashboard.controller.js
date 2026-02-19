@@ -22,11 +22,14 @@ export const getPartnerEvents = async (req, res) => {
         const query = { partnerName: name };
         if (status) query.status = status;
 
-        const events = await Event.find(query)
-            .sort({ createdAt: -1 })
-            .skip((page - 1) * limit)
-            .limit(Number(limit))
-            .lean();
+        const [events, total] = await Promise.all([
+            Event.find(query)
+                .sort({ createdAt: -1 })
+                .skip((page - 1) * limit)
+                .limit(Number(limit))
+                .lean(),
+            Event.countDocuments(query)
+        ]);
 
         const eventIds = events.map((e) => e.eventId);
         const savingsByEvent = eventIds.length
@@ -48,6 +51,7 @@ export const getPartnerEvents = async (req, res) => {
             status: 'SUCCESS',
             page,
             limit,
+            total,
             count: enrichedEvents.length,
             events: enrichedEvents
         });
@@ -336,6 +340,46 @@ export const getPartnerNotifications = async (req, res) => {
             limit,
             total,
             notifications
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const getPartnerNotificationSummary = async (req, res) => {
+    try {
+        const partnerId = req.partner.id;
+        const unreadCount = await PartnerNotification.countDocuments({
+            partnerId,
+            read: { $ne: true }
+        });
+
+        return res.json({
+            status: "SUCCESS",
+            unreadCount
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const markPartnerNotificationsRead = async (req, res) => {
+    try {
+        const partnerId = req.partner.id;
+        const result = await PartnerNotification.updateMany(
+            { partnerId, read: { $ne: true } },
+            { $set: { read: true } }
+        );
+
+        return res.json({
+            status: "SUCCESS",
+            updated: result.modifiedCount || 0
         });
     } catch (error) {
         return res.status(500).json({

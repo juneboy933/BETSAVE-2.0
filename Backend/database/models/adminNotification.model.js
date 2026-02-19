@@ -39,6 +39,14 @@ const adminNotificationSchema = new mongoose.Schema(
         metadata: {
             type: Object,
             default: {}
+        },
+        read: {
+            type: Boolean,
+            default: false
+        },
+        readAt: {
+            type: Date,
+            default: null
         }
     },
     { timestamps: true }

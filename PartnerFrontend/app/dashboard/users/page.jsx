@@ -9,6 +9,8 @@ export default function PartnerDashboardUsers() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [filters, setFilters] = useState({ phone: "", status: "ALL", source: "ALL" });
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   const filteredUsers = useMemo(() => {
     const phoneNeedle = filters.phone.trim().toLowerCase();
@@ -26,6 +28,13 @@ export default function PartnerDashboardUsers() {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
   }, [users, filters]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, users.length]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const pagedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const loadUsers = async () => {
     try {
@@ -124,7 +133,7 @@ export default function PartnerDashboardUsers() {
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.map((u) => (
+            {pagedUsers.map((u) => (
               <tr key={u._id}>
                 <td>{u.phoneNumber}</td>
                 <td>{u.source}</td>
@@ -132,7 +141,7 @@ export default function PartnerDashboardUsers() {
                 <td>{new Date(u.createdAt).toLocaleString()}</td>
               </tr>
             ))}
-            {filteredUsers.length === 0 && (
+            {pagedUsers.length === 0 && (
               <tr>
                 <td colSpan={4} className="text-center text-slate-500">
                   No users loaded.
@@ -141,6 +150,21 @@ export default function PartnerDashboardUsers() {
             )}
           </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <button className="btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+          Previous
+        </button>
+        <p className="text-xs font-medium text-slate-500">
+          Page {currentPage} of {totalPages}
+        </p>
+        <button
+          className="btn"
+          disabled={currentPage >= totalPages}
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+        >
+          Next
+        </button>
       </div>
     </article>
   );
