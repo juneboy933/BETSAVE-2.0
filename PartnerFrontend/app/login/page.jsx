@@ -16,12 +16,17 @@ export default function PartnerLoginPage() {
   const onLogin = async () => {
     try {
       setError("");
-      await request("/api/v1/partners/login", {
+      const result = await request("/api/v1/partners/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form)
       });
       setPartnerCreds(form);
+      sessionStorage.setItem(
+        "partner_security_notice",
+        result.securityNotice ||
+          "Store your API key and API secret securely in your backend secret manager."
+      );
       router.push("/dashboard");
     } catch (err) {
       setError(err.message);
@@ -45,6 +50,9 @@ export default function PartnerLoginPage() {
           <h1 className="text-3xl font-bold text-slate-900">Login Partner</h1>
           <p className="mt-2 text-sm text-slate-600">
             New here? <Link className="font-semibold text-brand" href="/register">Create your account</Link>.
+          </p>
+          <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+            Keep your API credentials secure. Store them only on your backend and secret manager.
           </p>
 
           <label className="label">Backend API URL</label>

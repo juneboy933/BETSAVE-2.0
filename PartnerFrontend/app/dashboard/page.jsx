@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getPartnerCreds, signedRequest } from "../../lib/api";
+import { getPartnerCreds, setPartnerCreds, signedRequest } from "../../lib/api";
 
 export default function PartnerDashboardOverview() {
   const [rows, setRows] = useState([]);
+  const [credentials, setCredentials] = useState({ apiKey: "", apiSecret: "" });
+  const [credentialsMessage, setCredentialsMessage] = useState("");
   const [error, setError] = useState("");
+  const [credentialsError, setCredentialsError] = useState("");
   const statusClass = (status) =>
     status === "PROCESSED"
       ? "bg-emerald-50 text-emerald-800 font-semibold"
@@ -15,6 +18,8 @@ export default function PartnerDashboardOverview() {
   const amountClass = (value) =>
     Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
   const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
+  const secureStorageNotice =
+    "Store your API key and API secret in a backend secret manager and never expose them in browser code.";
 
   const load = async () => {
     try {
@@ -33,7 +38,37 @@ export default function PartnerDashboardOverview() {
     }
   };
 
+  const loadCredentials = async () => {
+    try {
+      setCredentialsError("");
+      const creds = getPartnerCreds();
+      const data = await signedRequest({
+        method: "GET",
+        path: "/api/v1/partners/credentials",
+        body: {},
+        apiKey: creds.apiKey,
+        apiSecret: creds.apiSecret
+      });
+      const next = {
+        apiKey: data.credentials?.apiKey || "",
+        apiSecret: data.credentials?.apiSecret || ""
+      };
+      setCredentials(next);
+      setPartnerCreds(next);
+      setCredentialsMessage(data.securityNotice || secureStorageNotice);
+    } catch (err) {
+      setCredentialsError(err.message);
+    }
+  };
+
   useEffect(() => {
+    const storedCreds = getPartnerCreds();
+    setCredentials(storedCreds);
+    const pendingNotice = sessionStorage.getItem("partner_security_notice");
+    if (pendingNotice) {
+      setCredentialsMessage(pendingNotice);
+      sessionStorage.removeItem("partner_security_notice");
+    }
     load();
     const intervalId = setInterval(load, 10000);
     return () => clearInterval(intervalId);
@@ -79,6 +114,23 @@ export default function PartnerDashboardOverview() {
           </tbody>
         </table>
       </div>
+
+      <article className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-bold text-amber-900">Partner API Credentials</h3>
+          <button className="btn-secondary" onClick={loadCredentials}>
+            Load Saved Credentials
+          </button>
+        </div>
+        <p className="mb-3 text-sm font-semibold text-amber-900">
+          {credentialsMessage || secureStorageNotice}
+        </p>
+        <label className="label">API Key</label>
+        <input className="input" value={credentials.apiKey} readOnly />
+        <label className="label">API Secret</label>
+        <input className="input" value={credentials.apiSecret} readOnly />
+        {credentialsError && <p className="mt-2 text-sm font-semibold text-red-700">{credentialsError}</p>}
+      </article>
     </article>
   );
 }

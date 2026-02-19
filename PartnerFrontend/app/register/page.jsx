@@ -22,6 +22,11 @@ export default function PartnerRegisterPage() {
         body: JSON.stringify(form)
       });
       setPartnerCreds({ apiKey: result.partner.apiKey, apiSecret: result.partner.apiSecret });
+      sessionStorage.setItem(
+        "partner_security_notice",
+        result.securityNotice ||
+          "Store your API key and API secret securely in your backend secret manager."
+      );
       router.push("/dashboard");
     } catch (err) {
       setError(err.message);
@@ -45,6 +50,9 @@ export default function PartnerRegisterPage() {
           <h1 className="text-3xl font-bold text-slate-900">Register Partner</h1>
           <p className="mt-2 text-sm text-slate-600">
             Already registered? <Link className="font-semibold text-brand" href="/login">Login here</Link>.
+          </p>
+          <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+            Store your API key and API secret securely after registration. Never expose them in frontend code.
           </p>
 
           <label className="label">Backend API URL</label>

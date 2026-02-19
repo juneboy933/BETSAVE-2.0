@@ -3,6 +3,9 @@ import { registerPartnerUser } from "../../service/registerPartnerUser.service.j
 import Partner from "../../database/models/partner.model.js";
 import crypto from "crypto";
 
+const CREDENTIALS_SECURITY_NOTICE =
+    "Store your API key and API secret securely in your backend secret manager. Do not expose them in client-side code.";
+
 export const createPartner = async (req, res) => {
     try {
         const { name, webhookUrl } = req.body;
@@ -18,7 +21,8 @@ export const createPartner = async (req, res) => {
 
         return res.status(201).json({
             status: 'SUCCESS',
-            partner
+            partner,
+            securityNotice: CREDENTIALS_SECURITY_NOTICE
         });
 
     } catch (error) {
@@ -76,7 +80,50 @@ export const loginPartner = async (req, res) => {
                 apiKey: partner.apiKey,
                 webhookUrl: partner.webhookUrl,
                 status: partner.status
-            }
+            },
+            securityNotice: CREDENTIALS_SECURITY_NOTICE
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const getPartnerCredentials = async (req, res) => {
+    try {
+        if (!req.partner?.id) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Partner not authenticated"
+            });
+        }
+
+        const partner = await Partner.findById(req.partner.id)
+            .select("_id name apiKey apiSecret status");
+
+        if (!partner) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "Partner not found"
+            });
+        }
+
+        if (partner.status !== "ACTIVE") {
+            return res.status(403).json({
+                status: "FAILED",
+                reason: "Partner is suspended"
+            });
+        }
+
+        return res.json({
+            status: "SUCCESS",
+            credentials: {
+                apiKey: partner.apiKey,
+                apiSecret: partner.apiSecret
+            },
+            securityNotice: CREDENTIALS_SECURITY_NOTICE
         });
     } catch (error) {
         return res.status(500).json({
