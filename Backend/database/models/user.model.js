@@ -19,6 +19,26 @@ const userSchema = new mongoose.Schema({
         type: String,
         enum: ['PENDING', 'ACTIVE', 'SUSPENDED'],
         default: 'PENDING'
+    },
+    suspension: {
+        reason: {
+            type: String,
+            trim: true,
+            default: null
+        },
+        photoUrl: {
+            type: String,
+            trim: true,
+            default: null
+        },
+        notifyPartners: {
+            type: Boolean,
+            default: false
+        },
+        suspendedAt: {
+            type: Date,
+            default: null
+        }
     }
 }, { timestamps: true });
 

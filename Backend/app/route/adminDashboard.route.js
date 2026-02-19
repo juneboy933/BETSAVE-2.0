@@ -6,6 +6,7 @@ import {
     getAdminEvents,
     getAdminSavings,
     getAdminOperations,
+    suspendUser,
     updatePartnerStatus
 } from "../controller/adminDashboard.controller.js";
 import { verifyAdmin } from "../middleware/adminAuth.middleware.js";
@@ -20,5 +21,6 @@ router.get("/events", getAdminEvents);
 router.get("/savings", getAdminSavings);
 router.get("/operations", getAdminOperations);
 router.patch("/partners/:partnerId/status", updatePartnerStatus);
+router.patch("/users/:userId/suspend", suspendUser);
 
 export default router;

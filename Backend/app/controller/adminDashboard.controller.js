@@ -5,6 +5,7 @@ import PartnerUser from "../../database/models/partnerUser.model.js";
 import User from "../../database/models/user.model.js";
 import Wallet from "../../database/models/wallet.model.js";
 import mongoose from "mongoose";
+import { sendpartnerWebhook } from "../../service/notifyPartner.service.js";
 
 const parsePagination = (query) => {
     const page = Math.max(1, Number(query.page) || 1);
@@ -197,6 +198,100 @@ export const updatePartnerStatus = async (req, res) => {
         return res.json({
             status: "SUCCESS",
             partner
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const suspendUser = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { reason, photoUrl, notifyPartners } = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "Invalid user id"
+            });
+        }
+
+        const normalizedReason = String(reason || "").trim();
+        if (!normalizedReason) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "Suspension reason is required"
+            });
+        }
+
+        const normalizedPhotoUrl = String(photoUrl || "").trim();
+        const shouldNotifyPartners = Boolean(notifyPartners);
+
+        const user = await User.findByIdAndUpdate(
+            userId,
+            {
+                $set: {
+                    status: "SUSPENDED",
+                    suspension: {
+                        reason: normalizedReason,
+                        photoUrl: normalizedPhotoUrl || null,
+                        notifyPartners: shouldNotifyPartners,
+                        suspendedAt: new Date()
+                    }
+                }
+            },
+            { new: true }
+        ).select("_id phoneNumber status suspension");
+
+        if (!user) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "User not found"
+            });
+        }
+
+        const partnerLinks = await PartnerUser.find({ userId: user._id })
+            .select("partnerId partnerName")
+            .lean();
+
+        const uniquePartnerNames = [...new Set(partnerLinks.map((link) => link.partnerName).filter(Boolean))];
+
+        await PartnerUser.updateMany(
+            { userId: user._id },
+            { $set: { status: "SUSPENDED" } }
+        );
+
+        let notifiedPartners = 0;
+        if (shouldNotifyPartners && uniquePartnerNames.length) {
+            await Promise.all(
+                uniquePartnerNames.map(async (partnerName) => {
+                    await sendpartnerWebhook({
+                        partnerName,
+                        payload: {
+                            eventType: "USER_SUSPENDED",
+                            occurredAt: new Date().toISOString(),
+                            user: {
+                                id: String(user._id),
+                                phoneNumber: user.phoneNumber,
+                                status: user.status,
+                                photoUrl: user.suspension?.photoUrl || null
+                            },
+                            reason: user.suspension?.reason || normalizedReason
+                        }
+                    });
+                })
+            );
+            notifiedPartners = uniquePartnerNames.length;
+        }
+
+        return res.json({
+            status: "SUCCESS",
+            user,
+            partnerCount: uniquePartnerNames.length,
+            notifiedPartners
         });
     } catch (error) {
         return res.status(500).json({
