@@ -279,10 +279,19 @@ export const getAdminSavings = async (_req, res) => {
                 .lean()
         ]);
 
+        const safeSummary = summary[0] || { totalSavings: 0, totalEntries: 0 };
+        const safeByPartner = byPartner.map((partner) => ({
+            ...partner,
+            totalSavings: clampNonNegative(partner.totalSavings)
+        }));
+
         return res.json({
             status: "SUCCESS",
-            summary: summary[0] || { totalSavings: 0, totalEntries: 0 },
-            byPartner,
+            summary: {
+                ...safeSummary,
+                totalSavings: clampNonNegative(safeSummary.totalSavings)
+            },
+            byPartner: safeByPartner,
             recentSavingsEntries: latestLedger
         });
     } catch (error) {

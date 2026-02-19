@@ -7,9 +7,9 @@ export default function AdminDashboardSavings() {
   const [summary, setSummary] = useState(null);
   const [byPartner, setByPartner] = useState([]);
   const [error, setError] = useState("");
-  const amountClass = (value) =>
-    Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
-  const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
+  const safeAmount = (value) => Math.max(0, Number(value) || 0);
+  const amountClass = () => "bg-emerald-50 text-emerald-800 font-semibold";
+  const amountLabel = (value) => `+${safeAmount(value)}`;
 
   const refresh = async () => {
     try {

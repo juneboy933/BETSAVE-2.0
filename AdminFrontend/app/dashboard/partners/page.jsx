@@ -36,6 +36,22 @@ export default function AdminDashboardPartners() {
     }
   };
 
+  const quickUpdate = async (partnerId, status) => {
+    setForm({ partnerId, status });
+    try {
+      setError("");
+      const result = await request(`/api/v1/dashboard/admin/partners/${partnerId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "x-admin-token": getAdminToken() },
+        body: JSON.stringify({ status })
+      });
+      setMessage(`Updated ${result.partner.name} to ${result.partner.status}`);
+      await refresh();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   useEffect(() => {
     refresh();
     const intervalId = setInterval(refresh, 10000);
@@ -65,26 +81,39 @@ export default function AdminDashboardPartners() {
         <table className="table">
           <thead>
             <tr>
+              <th>Partner ID</th>
               <th>Name</th>
               <th>Status</th>
               <th>Webhook</th>
               <th>Total Events</th>
               <th>Total Amount</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {partners.map((p) => (
               <tr key={p._id}>
+                <td className="font-mono text-xs">{p._id}</td>
                 <td>{p.name}</td>
                 <td>{p.status}</td>
                 <td>{p.webhookUrl || "-"}</td>
                 <td>{p.stats?.totalEvents || 0}</td>
                 <td>{p.stats?.totalAmount || 0}</td>
+                <td>
+                  <div className="flex flex-wrap gap-2">
+                    <button className="btn-secondary" onClick={() => quickUpdate(p._id, "ACTIVE")}>
+                      Activate
+                    </button>
+                    <button className="btn" onClick={() => quickUpdate(p._id, "SUSPENDED")}>
+                      Suspend
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
             {partners.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-slate-500">
+                <td colSpan={7} className="text-center text-slate-500">
                   No partners loaded.
                 </td>
               </tr>
