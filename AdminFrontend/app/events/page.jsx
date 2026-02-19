@@ -48,6 +48,7 @@ export default function EventsPage() {
                 <th>Phone</th>
                 <th>Status</th>
                 <th>Amount</th>
+                <th>Savings Amount</th>
                 <th>Created</th>
               </tr>
             </thead>
@@ -59,12 +60,13 @@ export default function EventsPage() {
                   <td>{e.phone}</td>
                   <td className={statusClass(e.status)}>{e.status}</td>
                   <td className={amountClass(e.amount)}>{amountLabel(e.amount)}</td>
+                  <td className={amountClass(e.savingsAmount)}>{amountLabel(e.savingsAmount)}</td>
                   <td>{new Date(e.createdAt).toLocaleString()}</td>
                 </tr>
               ))}
               {events.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center text-slate-500">
+                  <td colSpan={7} className="text-center text-slate-500">
                     No events loaded.
                   </td>
                 </tr>

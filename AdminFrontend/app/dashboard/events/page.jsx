@@ -52,6 +52,7 @@ export default function AdminDashboardEvents() {
               <th>Phone</th>
               <th>Status</th>
               <th>Amount</th>
+              <th>Savings Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -62,11 +63,12 @@ export default function AdminDashboardEvents() {
                 <td>{e.phone}</td>
                 <td className={statusClass(e.status)}>{e.status}</td>
                 <td className={amountClass(e.amount)}>{amountLabel(e.amount)}</td>
+                <td className={amountClass(e.savingsAmount)}>{amountLabel(e.savingsAmount)}</td>
               </tr>
             ))}
             {events.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-slate-500">
+                <td colSpan={6} className="text-center text-slate-500">
                   No events loaded.
                 </td>
               </tr>

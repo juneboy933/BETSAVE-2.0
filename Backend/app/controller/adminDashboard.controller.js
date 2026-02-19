@@ -618,6 +618,11 @@ export const getAdminEvents = async (req, res) => {
     try {
         const { page, limit } = parsePagination(req.query);
         const skip = (page - 1) * limit;
+        const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
+        const safeSavingsPercentage =
+            Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
+                ? savingsPercentage
+                : 0.1;
 
         const query = {};
         if (req.query.status) query.status = req.query.status;
@@ -633,12 +638,32 @@ export const getAdminEvents = async (req, res) => {
             Event.countDocuments(query)
         ]);
 
+        const eventIds = events.map((event) => event.eventId);
+        const savingsByEvent = eventIds.length
+            ? await Ledger.aggregate([
+                { $match: { account: "USER_SAVINGS", eventId: { $in: eventIds } } },
+                { $group: { _id: "$eventId", savingsAmount: { $sum: "$amount" } } }
+            ])
+            : [];
+
+        const savingsMap = new Map(
+            savingsByEvent.map((item) => [item._id, clampNonNegative(item.savingsAmount)])
+        );
+        const enrichedEvents = events.map((event) => ({
+            ...event,
+            savingsAmount:
+                savingsMap.get(event.eventId) ??
+                (event.status !== "FAILED"
+                    ? clampNonNegative(Math.round((event.amount || 0) * safeSavingsPercentage))
+                    : 0)
+        }));
+
         return res.json({
             status: "SUCCESS",
             page,
             limit,
             total,
-            events
+            events: enrichedEvents
         });
     } catch (error) {
         return res.status(500).json({
