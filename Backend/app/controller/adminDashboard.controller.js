@@ -6,6 +6,8 @@ import User from "../../database/models/user.model.js";
 import Wallet from "../../database/models/wallet.model.js";
 import mongoose from "mongoose";
 import { sendpartnerWebhook } from "../../service/notifyPartner.service.js";
+import PartnerNotification from "../../database/models/partnerNotification.model.js";
+import AdminNotification from "../../database/models/adminNotification.model.js";
 
 const parsePagination = (query) => {
     const page = Math.max(1, Number(query.page) || 1);
@@ -14,6 +16,18 @@ const parsePagination = (query) => {
 };
 
 const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
+
+const logAdminDecision = async (req, payload) => {
+    try {
+        await AdminNotification.create({
+            ...payload,
+            actorName: req.admin?.name || "Admin",
+            actorEmail: req.admin?.email || null
+        });
+    } catch (error) {
+        console.error("Failed to log admin decision:", error.message);
+    }
+};
 
 export const getAdminOverview = async (_req, res) => {
     try {
@@ -195,6 +209,18 @@ export const updatePartnerStatus = async (req, res) => {
             });
         }
 
+        await logAdminDecision(req, {
+            action: "PARTNER_STATUS_UPDATED",
+            title: "Partner Status Updated",
+            message: `Partner ${partner.name} status changed to ${partner.status}.`,
+            targetType: "PARTNER",
+            targetId: String(partnerId),
+            metadata: {
+                status: partner.status,
+                webhookUrl: partner.webhookUrl
+            }
+        });
+
         return res.json({
             status: "SUCCESS",
             partner
@@ -257,7 +283,14 @@ export const suspendUser = async (req, res) => {
             .select("partnerId partnerName")
             .lean();
 
-        const uniquePartnerNames = [...new Set(partnerLinks.map((link) => link.partnerName).filter(Boolean))];
+        const uniquePartners = [
+            ...new Map(
+                partnerLinks
+                    .filter((link) => link.partnerId && link.partnerName)
+                    .map((link) => [String(link.partnerId), link])
+            ).values()
+        ];
+        const uniquePartnerNames = uniquePartners.map((partner) => partner.partnerName);
 
         await PartnerUser.updateMany(
             { userId: user._id },
@@ -266,6 +299,24 @@ export const suspendUser = async (req, res) => {
 
         let notifiedPartners = 0;
         if (shouldNotifyPartners && uniquePartnerNames.length) {
+            await PartnerNotification.insertMany(
+                uniquePartners.map((partner) => ({
+                    partnerId: partner.partnerId,
+                    partnerName: partner.partnerName,
+                    type: "USER_SUSPENDED",
+                    title: "User Suspended By Admin",
+                    message: `User ${user.phoneNumber} was suspended by admin. Reason: ${normalizedReason}`,
+                    payload: {
+                        userId: String(user._id),
+                        phoneNumber: user.phoneNumber,
+                        reason: normalizedReason,
+                        photoUrl: normalizedPhotoUrl || null,
+                        suspendedAt: user.suspension?.suspendedAt || new Date().toISOString()
+                    },
+                    source: "ADMIN"
+                }))
+            );
+
             await Promise.all(
                 uniquePartnerNames.map(async (partnerName) => {
                     await sendpartnerWebhook({
@@ -287,11 +338,54 @@ export const suspendUser = async (req, res) => {
             notifiedPartners = uniquePartnerNames.length;
         }
 
+        await logAdminDecision(req, {
+            action: "USER_SUSPENDED",
+            title: "User Suspended",
+            message: `User ${user.phoneNumber} was suspended.`,
+            targetType: "USER",
+            targetId: String(user._id),
+            metadata: {
+                reason: normalizedReason,
+                notifyPartners: shouldNotifyPartners,
+                partnerCount: uniquePartnerNames.length,
+                notifiedPartners
+            }
+        });
+
         return res.json({
             status: "SUCCESS",
             user,
             partnerCount: uniquePartnerNames.length,
             notifiedPartners
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const getAdminNotifications = async (req, res) => {
+    try {
+        const { page, limit } = parsePagination(req.query);
+        const skip = (page - 1) * limit;
+
+        const [notifications, total] = await Promise.all([
+            AdminNotification.find({})
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            AdminNotification.countDocuments()
+        ]);
+
+        return res.json({
+            status: "SUCCESS",
+            page,
+            limit,
+            total,
+            notifications
         });
     } catch (error) {
         return res.status(500).json({

@@ -1,5 +1,6 @@
 import Event from '../../database/models/event.model.js';
 import Ledger from "../../database/models/ledger.model.js";
+import PartnerNotification from "../../database/models/partnerNotification.model.js";
 import PartnerUser from "../../database/models/partnerUser.model.js";
 import Wallet from "../../database/models/wallet.model.js";
 
@@ -249,6 +250,37 @@ export const getPartnerUsers = async (req, res) => {
             limit,
             total,
             users: partnerUsers
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const getPartnerNotifications = async (req, res) => {
+    try {
+        const partnerId = req.partner.id;
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+        const skip = (page - 1) * limit;
+
+        const [notifications, total] = await Promise.all([
+            PartnerNotification.find({ partnerId })
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+            PartnerNotification.countDocuments({ partnerId })
+        ]);
+
+        return res.json({
+            status: "SUCCESS",
+            page,
+            limit,
+            total,
+            notifications
         });
     } catch (error) {
         return res.status(500).json({

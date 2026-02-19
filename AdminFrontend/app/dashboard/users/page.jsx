@@ -124,58 +124,61 @@ export default function AdminDashboardUsers() {
       </div>
 
       {showSuspendForm && suspendTarget && (
-        <article className="rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="text-base font-bold">Suspend User</h3>
-          <label className="label">User Number</label>
-          <input className="input" value={suspendTarget.phoneNumber || ""} readOnly />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+          <article className="w-full max-w-xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+            <h3 className="text-base font-bold">Suspend User</h3>
+            <label className="label">User Number</label>
+            <input className="input" value={suspendTarget.phoneNumber || ""} readOnly />
 
-          <label className="label">Reason (required)</label>
-          <textarea
-            className="input min-h-24"
-            value={suspendForm.reason}
-            onChange={(e) => setSuspendForm({ ...suspendForm, reason: e.target.value })}
-            placeholder="State why this user should be suspended"
-          />
-
-          <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
-            <input
-              type="checkbox"
-              checked={suspendForm.includePhoto}
-              onChange={(e) => setSuspendForm({ ...suspendForm, includePhoto: e.target.checked })}
+            <label className="label">Reason (required)</label>
+            <textarea
+              className="input min-h-24"
+              value={suspendForm.reason}
+              onChange={(e) => setSuspendForm({ ...suspendForm, reason: e.target.value })}
+              placeholder="State why this user should be suspended"
+              required
             />
-            Include user photo
-          </label>
 
-          {suspendForm.includePhoto && (
-            <>
-              <label className="label">User Photo URL (optional)</label>
+            <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
               <input
-                className="input"
-                value={suspendForm.photoUrl}
-                onChange={(e) => setSuspendForm({ ...suspendForm, photoUrl: e.target.value })}
-                placeholder="https://..."
+                type="checkbox"
+                checked={suspendForm.includePhoto}
+                onChange={(e) => setSuspendForm({ ...suspendForm, includePhoto: e.target.checked })}
               />
-            </>
-          )}
+              Include user photo
+            </label>
 
-          <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
-            <input
-              type="checkbox"
-              checked={suspendForm.notifyPartners}
-              onChange={(e) => setSuspendForm({ ...suspendForm, notifyPartners: e.target.checked })}
-            />
-            Notify every betting partner linked to this user
-          </label>
+            {suspendForm.includePhoto && (
+              <>
+                <label className="label">User Photo URL (optional)</label>
+                <input
+                  className="input"
+                  value={suspendForm.photoUrl}
+                  onChange={(e) => setSuspendForm({ ...suspendForm, photoUrl: e.target.value })}
+                  placeholder="https://..."
+                />
+              </>
+            )}
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button className="btn" onClick={suspendUser}>
-              Suspend
-            </button>
-            <button className="btn-secondary" onClick={closeSuspendForm}>
-              Cancel
-            </button>
-          </div>
-        </article>
+            <label className="mt-3 flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={suspendForm.notifyPartners}
+                onChange={(e) => setSuspendForm({ ...suspendForm, notifyPartners: e.target.checked })}
+              />
+              Notify every betting partner linked to this user
+            </label>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button className="btn" onClick={suspendUser} disabled={!suspendForm.reason.trim()}>
+                Suspend
+              </button>
+              <button className="btn-secondary" onClick={closeSuspendForm}>
+                Cancel
+              </button>
+            </div>
+          </article>
+        </div>
       )}
     </article>
   );

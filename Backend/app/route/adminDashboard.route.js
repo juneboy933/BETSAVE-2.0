@@ -4,6 +4,7 @@ import {
     getAdminPartners,
     getAdminUsers,
     getAdminEvents,
+    getAdminNotifications,
     getAdminSavings,
     getAdminOperations,
     suspendUser,
@@ -18,6 +19,7 @@ router.get("/overview", getAdminOverview);
 router.get("/partners", getAdminPartners);
 router.get("/users", getAdminUsers);
 router.get("/events", getAdminEvents);
+router.get("/notifications", getAdminNotifications);
 router.get("/savings", getAdminSavings);
 router.get("/operations", getAdminOperations);
 router.patch("/partners/:partnerId/status", updatePartnerStatus);
