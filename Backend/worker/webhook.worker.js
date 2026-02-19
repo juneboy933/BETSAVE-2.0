@@ -3,6 +3,15 @@ import { sendpartnerWebhook } from '../service/notifyPartner.service.js';
 import redisConnection from './config.js';
 import { connectDB } from '../database/config.js';
 
+process.on("uncaughtException", (err) => {
+    console.error("webhook-worker uncaughtException:", err.message);
+});
+
+process.on("unhandledRejection", (reason) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    console.error("webhook-worker unhandledRejection:", message);
+});
+
 await connectDB();
 
 const webhookWorker = new Worker(
@@ -24,7 +33,11 @@ webhookWorker.on('completed', (job) => console.log(`[${job.name}] completed`, jo
 
 webhookWorker.on('failed', (job, err) => {
     console.error(`[${job?.name}] failed`, job?.id, err.message);
-    if (job.attemptsMade === job.opts.attempts) {
+    if ((job?.attemptsMade ?? 0) >= (job?.opts?.attempts ?? 0) && job?.opts?.attempts) {
         console.error('PERMANENT FAILURE', { jobId: job.id, partnerName: job.data.partnerName, eventId: job.data.eventId });
     }
+});
+
+webhookWorker.on("error", (err) => {
+    console.error("webhook-worker error:", err.message);
 });
