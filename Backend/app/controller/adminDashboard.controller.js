@@ -135,7 +135,7 @@ export const getAdminPartners = async (req, res) => {
         const { page, limit } = parsePagination(req.query);
         const skip = (page - 1) * limit;
 
-        const [partners, eventStats, total] = await Promise.all([
+        const [partners, eventStats, savingsStats, total] = await Promise.all([
             Partner.find({})
                 .sort({ createdAt: -1 })
                 .skip(skip)
@@ -165,10 +165,30 @@ export const getAdminPartners = async (req, res) => {
                     }
                 }
             ]),
+            Ledger.aggregate([
+                { $match: { account: "USER_SAVINGS" } },
+                {
+                    $lookup: {
+                        from: "events",
+                        localField: "eventId",
+                        foreignField: "eventId",
+                        as: "event"
+                    }
+                },
+                { $unwind: "$event" },
+                { $match: { "event.status": "PROCESSED" } },
+                {
+                    $group: {
+                        _id: "$event.partnerName",
+                        totalSavings: { $sum: "$amount" }
+                    }
+                }
+            ]),
             Partner.countDocuments()
         ]);
 
         const statsByName = new Map(eventStats.map((stat) => [stat._id, stat]));
+        const savingsByName = new Map(savingsStats.map((stat) => [stat._id, stat.totalSavings]));
         const data = partners.map((partner) => {
             const stat = statsByName.get(partner.name);
             return {
@@ -177,7 +197,8 @@ export const getAdminPartners = async (req, res) => {
                     totalEvents: stat?.totalEvents || 0,
                     processedEvents: stat?.processedEvents || 0,
                     failedEvents: stat?.failedEvents || 0,
-                    totalAmount: stat?.totalAmount || 0
+                    totalAmount: stat?.totalAmount || 0,
+                    totalSavings: clampNonNegative(savingsByName.get(partner.name))
                 }
             };
         });

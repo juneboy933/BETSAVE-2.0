@@ -11,6 +11,7 @@ const navLinks = [
   { href: "/dashboard/users", label: "Users" },
   { href: "/dashboard/events", label: "Events" },
   { href: "/dashboard/savings", label: "Savings" },
+  { href: "/dashboard/notifications", label: "Notifications" },
   { href: "/dashboard/operations", label: "Operations" }
 ];
 

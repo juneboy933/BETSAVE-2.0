@@ -84,6 +84,7 @@ export default function AdminDashboardPartners() {
               <th>Webhook</th>
               <th>Total Events</th>
               <th>Total Amount</th>
+              <th>Total Savings</th>
               <th>Action</th>
             </tr>
           </thead>
@@ -96,6 +97,7 @@ export default function AdminDashboardPartners() {
                 <td>{p.webhookUrl || "-"}</td>
                 <td>{p.stats?.totalEvents || 0}</td>
                 <td>{p.stats?.totalAmount || 0}</td>
+                <td>{p.stats?.totalSavings || 0}</td>
                 <td>
                   <button className="btn" onClick={() => router.push(`/dashboard/partners/${p._id}`)}>
                     Manage
@@ -105,7 +107,7 @@ export default function AdminDashboardPartners() {
             ))}
             {filteredPartners.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-slate-500">
+                <td colSpan={8} className="text-center text-slate-500">
                   No partners loaded.
                 </td>
               </tr>

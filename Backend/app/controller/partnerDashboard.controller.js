@@ -41,7 +41,7 @@ export const getPartnerEvents = async (req, res) => {
             ...event,
             savingsAmount:
                 savingsMap.get(event.eventId) ??
-                (event.status !== "FAILED" ? clampNonNegative(Math.round((event.amount || 0) * safeSavingsPercentage)) : 0)
+                (event.status === "PROCESSED" ? clampNonNegative(Math.round((event.amount || 0) * safeSavingsPercentage)) : 0)
         }));
 
         return res.json({
