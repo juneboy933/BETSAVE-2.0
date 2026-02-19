@@ -5,6 +5,13 @@ import PartnerUser from "../../database/models/partnerUser.model.js";
 import Wallet from "../../database/models/wallet.model.js";
 
 const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
+const normalizeProcessedSavings = (event, savingsAmount) => {
+    const normalized = clampNonNegative(savingsAmount);
+    if (event.status === "PROCESSED" && (event.amount || 0) > 0) {
+        return Math.max(1, normalized);
+    }
+    return normalized;
+};
 
 export const getPartnerEvents = async (req, res) => {
     try {
@@ -40,12 +47,18 @@ export const getPartnerEvents = async (req, res) => {
             : [];
 
         const savingsMap = new Map(savingsByEvent.map((x) => [x._id, clampNonNegative(x.savingsAmount)]));
-        const enrichedEvents = events.map((event) => ({
-            ...event,
-            savingsAmount:
-                savingsMap.get(event.eventId) ??
-                (event.status === "PROCESSED" ? clampNonNegative(Math.round((event.amount || 0) * safeSavingsPercentage)) : 0)
-        }));
+        const enrichedEvents = events.map((event) => {
+            const fallbackSavings =
+                event.status === "PROCESSED"
+                    ? clampNonNegative(Math.round((event.amount || 0) * safeSavingsPercentage))
+                    : 0;
+            const rawSavings = savingsMap.get(event.eventId) ?? fallbackSavings;
+
+            return {
+                ...event,
+                savingsAmount: normalizeProcessedSavings(event, rawSavings)
+            };
+        });
 
         return res.json({
             status: 'SUCCESS',
