@@ -12,7 +12,8 @@ export default function AdminDashboardUsers() {
   const [suspendForm, setSuspendForm] = useState({
     reason: "",
     includePhoto: false,
-    photoUrl: "",
+    photoData: "",
+    photoName: "",
     notifyPartners: true
   });
 
@@ -33,7 +34,8 @@ export default function AdminDashboardUsers() {
     setSuspendForm({
       reason: "",
       includePhoto: false,
-      photoUrl: "",
+      photoData: "",
+      photoName: "",
       notifyPartners: true
     });
     setShowSuspendForm(true);
@@ -53,7 +55,7 @@ export default function AdminDashboardUsers() {
       setMessage("");
       const payload = {
         reason: suspendForm.reason.trim(),
-        photoUrl: suspendForm.includePhoto ? suspendForm.photoUrl.trim() : "",
+        photoUrl: suspendForm.includePhoto ? suspendForm.photoData : "",
         notifyPartners: suspendForm.notifyPartners
       };
       const result = await request(`/api/v1/dashboard/admin/users/${suspendTarget._id}/suspend`, {
@@ -69,6 +71,28 @@ export default function AdminDashboardUsers() {
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const onPhotoSelected = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setSuspendForm((prev) => ({ ...prev, photoData: "", photoName: "" }));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSuspendForm((prev) => ({
+        ...prev,
+        photoData: typeof reader.result === "string" ? reader.result : "",
+        photoName: file.name
+      }));
+    };
+    reader.onerror = () => {
+      setError("Unable to read selected image file.");
+      setSuspendForm((prev) => ({ ...prev, photoData: "", photoName: "" }));
+    };
+    reader.readAsDataURL(file);
   };
 
   useEffect(() => {
@@ -150,13 +174,16 @@ export default function AdminDashboardUsers() {
 
             {suspendForm.includePhoto && (
               <>
-                <label className="label">User Photo URL (optional)</label>
-                <input
-                  className="input"
-                  value={suspendForm.photoUrl}
-                  onChange={(e) => setSuspendForm({ ...suspendForm, photoUrl: e.target.value })}
-                  placeholder="https://..."
-                />
+                <label className="label">User Photo (optional)</label>
+                <input className="input" type="file" accept="image/*" onChange={onPhotoSelected} />
+                {suspendForm.photoName && <p className="mt-2 text-xs text-slate-600">Selected: {suspendForm.photoName}</p>}
+                {suspendForm.photoData && (
+                  <img
+                    src={suspendForm.photoData}
+                    alt="Suspension evidence preview"
+                    className="mt-2 h-24 w-24 rounded-md border border-slate-200 object-cover"
+                  />
+                )}
               </>
             )}
 
