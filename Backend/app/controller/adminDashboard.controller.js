@@ -162,12 +162,113 @@ export const getAdminUsers = async (req, res) => {
             User.countDocuments()
         ]);
 
+        const userIds = users.map((user) => user._id);
+        const partnerLinks = userIds.length
+            ? await PartnerUser.find({ userId: { $in: userIds } })
+                .select("userId partnerName")
+                .lean()
+            : [];
+
+        const partnersByUserId = new Map();
+        partnerLinks.forEach((link) => {
+            const key = String(link.userId);
+            const current = partnersByUserId.get(key) || new Set();
+            if (link.partnerName) current.add(link.partnerName);
+            partnersByUserId.set(key, current);
+        });
+
+        const enrichedUsers = users.map((user) => {
+            const partners = [...(partnersByUserId.get(String(user._id)) || new Set())];
+            return {
+                ...user,
+                partners,
+                partnerCount: partners.length
+            };
+        });
+
         return res.json({
             status: "SUCCESS",
             page,
             limit,
             total,
-            users
+            users: enrichedUsers
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const getAdminUserSavingsBreakdown = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "Invalid user id"
+            });
+        }
+
+        const objectUserId = new mongoose.Types.ObjectId(userId);
+
+        const [user, wallet, totals, byPartner] = await Promise.all([
+            User.findById(objectUserId).select("_id phoneNumber status").lean(),
+            Wallet.findOne({ userId: objectUserId }).select("balance").lean(),
+            Ledger.aggregate([
+                { $match: { userId: objectUserId, account: "USER_SAVINGS" } },
+                {
+                    $group: {
+                        _id: null,
+                        totalSaved: { $sum: "$amount" },
+                        entries: { $sum: 1 }
+                    }
+                }
+            ]),
+            Ledger.aggregate([
+                { $match: { userId: objectUserId, account: "USER_SAVINGS" } },
+                {
+                    $lookup: {
+                        from: "events",
+                        localField: "eventId",
+                        foreignField: "eventId",
+                        as: "event"
+                    }
+                },
+                { $unwind: "$event" },
+                {
+                    $group: {
+                        _id: "$event.partnerName",
+                        totalSaved: { $sum: "$amount" },
+                        entries: { $sum: 1 }
+                    }
+                },
+                { $sort: { totalSaved: -1 } }
+            ])
+        ]);
+
+        if (!user) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "User not found"
+            });
+        }
+
+        const summary = totals[0] || { totalSaved: 0, entries: 0 };
+        const safeByPartner = byPartner.map((item) => ({
+            partnerName: item._id || "UNKNOWN",
+            totalSaved: clampNonNegative(item.totalSaved),
+            entries: item.entries || 0
+        }));
+
+        return res.json({
+            status: "SUCCESS",
+            user,
+            walletBalance: clampNonNegative(wallet?.balance),
+            totalSaved: clampNonNegative(summary.totalSaved),
+            totalEntries: summary.entries || 0,
+            byPartner: safeByPartner
         });
     } catch (error) {
         return res.status(500).json({

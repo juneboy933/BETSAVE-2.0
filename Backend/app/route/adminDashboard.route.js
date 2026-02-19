@@ -2,6 +2,7 @@ import express from "express";
 import {
     getAdminOverview,
     getAdminPartners,
+    getAdminUserSavingsBreakdown,
     getAdminUsers,
     getAdminEvents,
     getAdminNotifications,
@@ -18,6 +19,7 @@ router.use(verifyAdmin);
 router.get("/overview", getAdminOverview);
 router.get("/partners", getAdminPartners);
 router.get("/users", getAdminUsers);
+router.get("/users/:userId/savings-breakdown", getAdminUserSavingsBreakdown);
 router.get("/events", getAdminEvents);
 router.get("/notifications", getAdminNotifications);
 router.get("/savings", getAdminSavings);
