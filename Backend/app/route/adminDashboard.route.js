@@ -1,5 +1,6 @@
 import express from "express";
 import {
+    activateUser,
     getAdminOverview,
     getAdminPartners,
     getAdminUserSavingsBreakdown,
@@ -26,5 +27,6 @@ router.get("/savings", getAdminSavings);
 router.get("/operations", getAdminOperations);
 router.patch("/partners/:partnerId/status", updatePartnerStatus);
 router.patch("/users/:userId/suspend", suspendUser);
+router.patch("/users/:userId/activate", activateUser);
 
 export default router;

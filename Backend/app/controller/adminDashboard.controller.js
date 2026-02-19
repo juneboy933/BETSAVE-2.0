@@ -467,6 +467,124 @@ export const suspendUser = async (req, res) => {
     }
 };
 
+export const activateUser = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { notifyPartners } = req.body || {};
+
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "Invalid user id"
+            });
+        }
+
+        const shouldNotifyPartners = Boolean(notifyPartners);
+        const user = await User.findByIdAndUpdate(
+            userId,
+            {
+                $set: {
+                    status: "ACTIVE",
+                    "suspension.notifyPartners": shouldNotifyPartners
+                },
+                $unset: {
+                    "suspension.reason": 1,
+                    "suspension.photoUrl": 1,
+                    "suspension.suspendedAt": 1
+                }
+            },
+            { new: true }
+        ).select("_id phoneNumber status");
+
+        if (!user) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "User not found"
+            });
+        }
+
+        const partnerLinks = await PartnerUser.find({ userId: user._id })
+            .select("partnerId partnerName")
+            .lean();
+
+        const uniquePartners = [
+            ...new Map(
+                partnerLinks
+                    .filter((link) => link.partnerId && link.partnerName)
+                    .map((link) => [String(link.partnerId), link])
+            ).values()
+        ];
+        const uniquePartnerNames = uniquePartners.map((partner) => partner.partnerName);
+
+        await PartnerUser.updateMany(
+            { userId: user._id },
+            { $set: { status: "ACTIVE" } }
+        );
+
+        let notifiedPartners = 0;
+        if (shouldNotifyPartners && uniquePartnerNames.length) {
+            await PartnerNotification.insertMany(
+                uniquePartners.map((partner) => ({
+                    partnerId: partner.partnerId,
+                    partnerName: partner.partnerName,
+                    type: "USER_ACTIVATED",
+                    title: "User Reactivated By Admin",
+                    message: `User ${user.phoneNumber} was reactivated by admin.`,
+                    payload: {
+                        userId: String(user._id),
+                        phoneNumber: user.phoneNumber,
+                        activatedAt: new Date().toISOString()
+                    },
+                    source: "ADMIN"
+                }))
+            );
+
+            await Promise.all(
+                uniquePartnerNames.map(async (partnerName) => {
+                    await sendpartnerWebhook({
+                        partnerName,
+                        payload: {
+                            eventType: "USER_ACTIVATED",
+                            occurredAt: new Date().toISOString(),
+                            user: {
+                                id: String(user._id),
+                                phoneNumber: user.phoneNumber,
+                                status: user.status
+                            }
+                        }
+                    });
+                })
+            );
+            notifiedPartners = uniquePartnerNames.length;
+        }
+
+        await logAdminDecision(req, {
+            action: "USER_ACTIVATED",
+            title: "User Activated",
+            message: `User ${user.phoneNumber} was activated.`,
+            targetType: "USER",
+            targetId: String(user._id),
+            metadata: {
+                notifyPartners: shouldNotifyPartners,
+                partnerCount: uniquePartnerNames.length,
+                notifiedPartners
+            }
+        });
+
+        return res.json({
+            status: "SUCCESS",
+            user,
+            partnerCount: uniquePartnerNames.length,
+            notifiedPartners
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
 export const getAdminNotifications = async (req, res) => {
     try {
         const { page, limit } = parsePagination(req.query);
