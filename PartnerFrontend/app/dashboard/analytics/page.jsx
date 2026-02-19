@@ -6,6 +6,7 @@ import { getPartnerCreds, signedRequest } from "../../../lib/api";
 export default function PartnerDashboardAnalytics() {
   const [summary, setSummary] = useState([]);
   const [totalWalletBalance, setTotalWalletBalance] = useState(0);
+  const [totalProcessedAmount, setTotalProcessedAmount] = useState(0);
   const [behavior, setBehavior] = useState([]);
   const [error, setError] = useState("");
   const toPositiveNumber = (value) => Math.max(0, Number(value) || 0);
@@ -35,6 +36,7 @@ export default function PartnerDashboardAnalytics() {
       ]);
       setSummary(a.stat || []);
       setTotalWalletBalance(toPositiveNumber(a.totalWalletBalance));
+      setTotalProcessedAmount(toPositiveNumber(a.totalProcessedAmount));
       setBehavior(b.users || []);
     } catch (err) {
       setError(err.message);
@@ -61,6 +63,10 @@ export default function PartnerDashboardAnalytics() {
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs uppercase tracking-wide text-slate-500">Total Wallet Balance</p>
             <p className="mt-1 text-2xl font-bold">{totalWalletBalance}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Processed Event Amount</p>
+            <p className="mt-1 text-2xl font-bold">{totalProcessedAmount}</p>
           </div>
         </div>
       </article>

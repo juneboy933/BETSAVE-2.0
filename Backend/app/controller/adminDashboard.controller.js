@@ -31,12 +31,19 @@ const logAdminDecision = async (req, payload) => {
 
 export const getAdminOverview = async (_req, res) => {
     try {
+        const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
+        const safeSavingsPercentage =
+            Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
+                ? savingsPercentage
+                : 0.1;
+
         const [
             totalUsers,
             activeUsers,
             totalPartners,
             activePartners,
-            totalEvents,
+            totalProcessedEvents,
+            totalProcessedAmount,
             totalWalletBalance,
             totalSavingsLedger,
             eventByStatus
@@ -45,12 +52,48 @@ export const getAdminOverview = async (_req, res) => {
             User.countDocuments({ status: "ACTIVE" }),
             Partner.countDocuments(),
             Partner.countDocuments({ status: "ACTIVE" }),
-            Event.countDocuments(),
+            Event.countDocuments({ status: "PROCESSED" }),
+            Event.aggregate([
+                { $match: { status: "PROCESSED" } },
+                { $group: { _id: null, totalAmount: { $sum: "$amount" } } }
+            ]),
             Wallet.aggregate([
+                { $match: { balance: { $gt: 0 } } },
+                {
+                    $lookup: {
+                        from: "events",
+                        let: { walletUserId: "$userId" },
+                        pipeline: [
+                            {
+                                $match: {
+                                    $expr: {
+                                        $and: [
+                                            { $eq: ["$userId", "$$walletUserId"] },
+                                            { $eq: ["$status", "PROCESSED"] }
+                                        ]
+                                    }
+                                }
+                            },
+                            { $limit: 1 }
+                        ],
+                        as: "processedEvent"
+                    }
+                },
+                { $match: { processedEvent: { $ne: [] } } },
                 { $group: { _id: null, balance: { $sum: "$balance" } } }
             ]),
             Ledger.aggregate([
                 { $match: { account: "USER_SAVINGS" } },
+                {
+                    $lookup: {
+                        from: "events",
+                        localField: "eventId",
+                        foreignField: "eventId",
+                        as: "event"
+                    }
+                },
+                { $unwind: "$event" },
+                { $match: { "event.status": "PROCESSED" } },
                 { $group: { _id: null, total: { $sum: "$amount" } } }
             ]),
             Event.aggregate([
@@ -70,9 +113,12 @@ export const getAdminOverview = async (_req, res) => {
                 activeUsers,
                 totalPartners,
                 activePartners,
-                totalEvents,
+                totalEvents: totalProcessedEvents,
+                totalProcessedAmount: clampNonNegative(totalProcessedAmount[0]?.totalAmount),
                 totalWalletBalance: clampNonNegative(totalWalletBalance[0]?.balance),
-                totalSavingsLedger: clampNonNegative(totalSavingsLedger[0]?.total)
+                totalSavingsLedger:
+                    clampNonNegative(totalSavingsLedger[0]?.total) ||
+                    clampNonNegative(Math.round((totalProcessedAmount[0]?.totalAmount || 0) * safeSavingsPercentage))
             },
             eventByStatus
         });
@@ -111,7 +157,11 @@ export const getAdminPartners = async (req, res) => {
                                 $cond: [{ $eq: ["$status", "FAILED"] }, 1, 0]
                             }
                         },
-                        totalAmount: { $sum: "$amount" }
+                        totalAmount: {
+                            $sum: {
+                                $cond: [{ $eq: ["$status", "PROCESSED"] }, "$amount", 0]
+                            }
+                        }
                     }
                 }
             ]),
@@ -733,7 +783,7 @@ export const getAdminEvents = async (req, res) => {
             ...event,
             savingsAmount:
                 savingsMap.get(event.eventId) ??
-                (event.status !== "FAILED"
+                (event.status === "PROCESSED"
                     ? clampNonNegative(Math.round((event.amount || 0) * safeSavingsPercentage))
                     : 0)
         }));
@@ -800,7 +850,7 @@ export const getAdminSavings = async (_req, res) => {
                             "$ledgerSavings",
                             {
                                 $cond: [
-                                    { $ne: ["$status", "FAILED"] },
+                                    { $eq: ["$status", "PROCESSED"] },
                                     { $round: [{ $multiply: [{ $ifNull: ["$amount", 0] }, safeSavingsPercentage] }, 0] },
                                     0
                                 ]
@@ -813,6 +863,7 @@ export const getAdminSavings = async (_req, res) => {
 
         const [summary, byPartner, latestLedger] = await Promise.all([
             Event.aggregate([
+                { $match: { status: "PROCESSED" } },
                 ...eventSavingsPipeline,
                 {
                     $group: {
@@ -827,6 +878,7 @@ export const getAdminSavings = async (_req, res) => {
                 }
             ]),
             Event.aggregate([
+                { $match: { status: "PROCESSED" } },
                 ...eventSavingsPipeline,
                 {
                     $group: {

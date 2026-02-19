@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAdminToken, request } from "../../../lib/api";
 
@@ -8,6 +8,31 @@ export default function AdminDashboardUsers() {
   const router = useRouter();
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState({ phone: "", status: "ALL", partner: "" });
+
+  const filteredUsers = useMemo(() => {
+    const phoneNeedle = filters.phone.trim().toLowerCase();
+    const partnerNeedle = filters.partner.trim().toLowerCase();
+
+    return [...users]
+      .filter((user) => {
+        if (filters.status !== "ALL" && user.status !== filters.status) return false;
+        if (phoneNeedle && !String(user.phoneNumber || "").toLowerCase().includes(phoneNeedle)) return false;
+        if (
+          partnerNeedle &&
+          !(user.partners || []).some((partner) => String(partner).toLowerCase().includes(partnerNeedle))
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const statusRank = (value) => (value === "ACTIVE" ? 0 : value === "PENDING" ? 1 : 2);
+        const statusDelta = statusRank(a.status) - statusRank(b.status);
+        if (statusDelta !== 0) return statusDelta;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+  }, [users, filters]);
 
   const refresh = async () => {
     try {
@@ -35,6 +60,33 @@ export default function AdminDashboardUsers() {
           Refresh
         </button>
       </div>
+      <div className="grid gap-2 md:grid-cols-[1fr_220px_1fr]">
+        <input
+          className="input"
+          placeholder="Filter by phone"
+          value={filters.phone}
+          onChange={(e) => setFilters((prev) => ({ ...prev, phone: e.target.value }))}
+        />
+        <select
+          className="input"
+          value={filters.status}
+          onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+        >
+          <option value="ALL">All Statuses</option>
+          <option value="ACTIVE">ACTIVE</option>
+          <option value="PENDING">PENDING</option>
+          <option value="SUSPENDED">SUSPENDED</option>
+        </select>
+        <input
+          className="input"
+          placeholder="Filter by partner"
+          value={filters.partner}
+          onChange={(e) => setFilters((prev) => ({ ...prev, partner: e.target.value }))}
+        />
+      </div>
+      <p className="text-xs font-medium text-slate-500">
+        Showing {filteredUsers.length} of {users.length} users (current entries first).
+      </p>
       {error && <p className="text-sm font-semibold text-red-700">{error}</p>}
       <div className="table-wrap">
         <table className="table">
@@ -49,7 +101,7 @@ export default function AdminDashboardUsers() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {filteredUsers.map((u) => (
               <tr key={u._id}>
                 <td>{u.phoneNumber}</td>
                 <td>{u.status}</td>
@@ -63,7 +115,7 @@ export default function AdminDashboardUsers() {
                 </td>
               </tr>
             ))}
-            {users.length === 0 && (
+            {filteredUsers.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center text-slate-500">
                   No users loaded.

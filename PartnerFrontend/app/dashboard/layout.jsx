@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { clearPartnerCreds, getPartnerCreds, hasPartnerCreds, signedRequest } from "../../lib/api";
+import { clearPartnerCreds, getPartnerCreds, getPartnerName, hasPartnerCreds, signedRequest } from "../../lib/api";
 
 const navLinks = [
   { href: "/dashboard", label: "Overview" },
@@ -15,7 +15,8 @@ const navLinks = [
 export default function PartnerDashboardLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [stats, setStats] = useState({ totalWalletBalance: 0, totalUsers: 0, totalEvents: 0 });
+  const [partnerName, setPartnerName] = useState("");
+  const [stats, setStats] = useState({ totalWalletBalance: 0, totalUsers: 0, totalEvents: 0, totalProcessedAmount: 0 });
   const toPositiveNumber = (value) => Math.max(0, Number(value) || 0);
 
   useEffect(() => {
@@ -23,10 +24,11 @@ export default function PartnerDashboardLayout({ children }) {
       router.replace("/login");
       return;
     }
+    setPartnerName(getPartnerName());
     const load = async () => {
       try {
         const creds = getPartnerCreds();
-        const [a, u, e] = await Promise.all([
+        const [a, u] = await Promise.all([
           signedRequest({
             method: "GET",
             path: "/api/v1/dashboard/partner/analytics",
@@ -40,19 +42,14 @@ export default function PartnerDashboardLayout({ children }) {
             body: {},
             apiKey: creds.apiKey,
             apiSecret: creds.apiSecret
-          }),
-          signedRequest({
-            method: "GET",
-            path: "/api/v1/dashboard/partner/events?page=1&limit=1",
-            body: {},
-            apiKey: creds.apiKey,
-            apiSecret: creds.apiSecret
           })
         ]);
+        const processedEvents = (a.stat || []).find((item) => item._id === "PROCESSED")?.count || 0;
         setStats({
           totalWalletBalance: toPositiveNumber(a.totalWalletBalance),
           totalUsers: toPositiveNumber(u.total),
-          totalEvents: toPositiveNumber(e.count)
+          totalEvents: toPositiveNumber(processedEvents),
+          totalProcessedAmount: toPositiveNumber(a.totalProcessedAmount)
         });
       } catch {}
     };
@@ -82,6 +79,11 @@ export default function PartnerDashboardLayout({ children }) {
         </button>
       </header>
 
+      <section className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500">Logged In Partner</p>
+        <p className="text-lg font-bold text-slate-900">{partnerName || "Partner account"}</p>
+      </section>
+
       <section className="kpi-grid">
         <article className="kpi-tile">
           <p className="text-xs uppercase tracking-wide text-slate-500">Total Wallet Balance</p>
@@ -94,6 +96,10 @@ export default function PartnerDashboardLayout({ children }) {
         <article className="kpi-tile">
           <p className="text-xs uppercase tracking-wide text-slate-500">Events</p>
           <p className="mt-1 text-2xl font-bold text-slate-900">{stats.totalEvents}</p>
+        </article>
+        <article className="kpi-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Processed Event Amount</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{stats.totalProcessedAmount}</p>
         </article>
       </section>
 

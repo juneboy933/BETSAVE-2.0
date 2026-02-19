@@ -8,6 +8,7 @@ export default function PartnerDashboardEvents() {
   const [events, setEvents] = useState([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState({ status: "ALL", eventId: "", phone: "" });
   const statusClass = (status) =>
     status === "PROCESSED"
       ? "bg-emerald-50 text-emerald-800 font-semibold"
@@ -24,7 +25,7 @@ export default function PartnerDashboardEvents() {
       const creds = getPartnerCreds();
       const data = await signedRequest({
         method: "GET",
-        path: "/api/v1/dashboard/partner/events?page=1&limit=100",
+        path: `/api/v1/dashboard/partner/events?page=1&limit=100${filters.status !== "ALL" ? `&status=${encodeURIComponent(filters.status)}` : ""}`,
         body: {},
         apiKey: creds.apiKey,
         apiSecret: creds.apiSecret
@@ -58,7 +59,19 @@ export default function PartnerDashboardEvents() {
     refresh();
     const intervalId = setInterval(refresh, 10000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [filters.status]);
+
+  const filteredEvents = events
+    .filter((event) => {
+      if (filters.eventId.trim() && !String(event.eventId || "").toLowerCase().includes(filters.eventId.trim().toLowerCase())) {
+        return false;
+      }
+      if (filters.phone.trim() && !String(event.phone || "").toLowerCase().includes(filters.phone.trim().toLowerCase())) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
     <article className="card space-y-3">
@@ -77,6 +90,34 @@ export default function PartnerDashboardEvents() {
           Refresh
         </button>
       </div>
+      <div className="grid gap-2 md:grid-cols-[220px_1fr_1fr]">
+        <select
+          className="input"
+          value={filters.status}
+          onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+        >
+          <option value="ALL">All Statuses</option>
+          <option value="PROCESSED">PROCESSED</option>
+          <option value="RECEIVED">RECEIVED</option>
+          <option value="PROCESSING">PROCESSING</option>
+          <option value="FAILED">FAILED</option>
+        </select>
+        <input
+          className="input"
+          placeholder="Filter by event ID"
+          value={filters.eventId}
+          onChange={(e) => setFilters((prev) => ({ ...prev, eventId: e.target.value }))}
+        />
+        <input
+          className="input"
+          placeholder="Filter by phone"
+          value={filters.phone}
+          onChange={(e) => setFilters((prev) => ({ ...prev, phone: e.target.value }))}
+        />
+      </div>
+      <p className="text-xs font-medium text-slate-500">
+        Showing {filteredEvents.length} of {events.length} events (current entries first).
+      </p>
       {message && <p className="text-sm font-semibold text-emerald-700">{message}</p>}
       {error && <p className="text-sm font-semibold text-red-700">{error}</p>}
 
@@ -92,7 +133,7 @@ export default function PartnerDashboardEvents() {
             </tr>
           </thead>
           <tbody>
-            {events.map((e) => (
+            {filteredEvents.map((e) => (
               <tr key={e._id}>
                 <td>{e.eventId}</td>
                 <td className={statusClass(e.status)}>{e.status}</td>
@@ -101,7 +142,7 @@ export default function PartnerDashboardEvents() {
                 <td>{new Date(e.createdAt).toLocaleString()}</td>
               </tr>
             ))}
-            {events.length === 0 && (
+            {filteredEvents.length === 0 && (
               <tr>
                 <td colSpan={5} className="text-center text-slate-500">
                   No events loaded.

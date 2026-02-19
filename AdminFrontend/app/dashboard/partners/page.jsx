@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAdminToken, request } from "../../../lib/api";
 
@@ -8,6 +8,23 @@ export default function AdminDashboardPartners() {
   const router = useRouter();
   const [partners, setPartners] = useState([]);
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState({ name: "", status: "ALL" });
+
+  const filteredPartners = useMemo(() => {
+    const nameNeedle = filters.name.trim().toLowerCase();
+    return [...partners]
+      .filter((partner) => {
+        if (filters.status !== "ALL" && partner.status !== filters.status) return false;
+        if (nameNeedle && !String(partner.name || "").toLowerCase().includes(nameNeedle)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const statusRank = (value) => (value === "ACTIVE" ? 0 : 1);
+        const statusDelta = statusRank(a.status) - statusRank(b.status);
+        if (statusDelta !== 0) return statusDelta;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+  }, [partners, filters]);
 
   const refresh = async () => {
     try {
@@ -35,6 +52,26 @@ export default function AdminDashboardPartners() {
           Refresh
         </button>
       </div>
+      <div className="grid gap-2 md:grid-cols-[1fr_220px]">
+        <input
+          className="input"
+          placeholder="Filter by partner name"
+          value={filters.name}
+          onChange={(e) => setFilters((prev) => ({ ...prev, name: e.target.value }))}
+        />
+        <select
+          className="input"
+          value={filters.status}
+          onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+        >
+          <option value="ALL">All Statuses</option>
+          <option value="ACTIVE">ACTIVE</option>
+          <option value="SUSPENDED">SUSPENDED</option>
+        </select>
+      </div>
+      <p className="text-xs font-medium text-slate-500">
+        Showing {filteredPartners.length} of {partners.length} partners (current entries first).
+      </p>
       {error && <p className="text-sm font-semibold text-red-700">{error}</p>}
 
       <div className="table-wrap">
@@ -51,7 +88,7 @@ export default function AdminDashboardPartners() {
             </tr>
           </thead>
           <tbody>
-            {partners.map((p) => (
+            {filteredPartners.map((p) => (
               <tr key={p._id}>
                 <td className="font-mono text-xs">{p._id}</td>
                 <td>{p.name}</td>
@@ -66,7 +103,7 @@ export default function AdminDashboardPartners() {
                 </td>
               </tr>
             ))}
-            {partners.length === 0 && (
+            {filteredPartners.length === 0 && (
               <tr>
                 <td colSpan={7} className="text-center text-slate-500">
                   No partners loaded.

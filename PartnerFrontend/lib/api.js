@@ -18,6 +18,8 @@ export const getPartnerCreds = () => ({
   apiSecret: localStorage.getItem("partner_api_secret") || ""
 });
 
+export const getPartnerName = () => localStorage.getItem("partner_name") || "";
+
 export const hasPartnerCreds = () => {
   const { apiKey, apiSecret } = getPartnerCreds();
   return Boolean(apiKey && apiSecret);
@@ -28,9 +30,19 @@ export const setPartnerCreds = ({ apiKey, apiSecret }) => {
   localStorage.setItem("partner_api_secret", apiSecret.trim());
 };
 
+export const setPartnerName = (name) => {
+  const safeName = String(name || "").trim();
+  if (!safeName) {
+    localStorage.removeItem("partner_name");
+    return;
+  }
+  localStorage.setItem("partner_name", safeName);
+};
+
 export const clearPartnerCreds = () => {
   localStorage.removeItem("partner_api_key");
   localStorage.removeItem("partner_api_secret");
+  localStorage.removeItem("partner_name");
 };
 
 async function parseResponse(response) {

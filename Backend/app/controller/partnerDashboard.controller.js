@@ -62,8 +62,13 @@ export const getPartnerEvents = async (req, res) => {
 export const getPartnerAnalytics = async (req, res) => {
     try {
         const { name } = req.partner;
+        const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
+        const safeSavingsPercentage =
+            Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
+                ? savingsPercentage
+                : 0.1;
     
-        const [stat, totalSavingsAgg, totalWalletAgg] = await Promise.all([
+        const [stat, processedAmountAgg, totalSavingsAgg, totalWalletAgg] = await Promise.all([
             Event.aggregate([
                 { $match: { partnerName: name } },
                 {
@@ -73,6 +78,10 @@ export const getPartnerAnalytics = async (req, res) => {
                         totalAmount: { $sum: "$amount" }
                     }
                 }
+            ]),
+            Event.aggregate([
+                { $match: { partnerName: name, status: "PROCESSED" } },
+                { $group: { _id: null, totalProcessedAmount: { $sum: "$amount" } } }
             ]),
             Ledger.aggregate([
                 { $match: { account: "USER_SAVINGS" } },
@@ -85,7 +94,7 @@ export const getPartnerAnalytics = async (req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.partnerName": name } },
+                { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
                 { $group: { _id: null, totalSavings: { $sum: "$amount" } } }
             ]),
             Wallet.aggregate([
@@ -100,7 +109,8 @@ export const getPartnerAnalytics = async (req, res) => {
                                     $expr: {
                                         $and: [
                                             { $eq: ["$userId", "$$walletUserId"] },
-                                            { $eq: ["$partnerName", name] }
+                                            { $eq: ["$partnerName", name] },
+                                            { $eq: ["$status", "PROCESSED"] }
                                         ]
                                     }
                                 }
@@ -115,10 +125,14 @@ export const getPartnerAnalytics = async (req, res) => {
             ])
         ]);
     
+        const processedAmount = clampNonNegative(processedAmountAgg[0]?.totalProcessedAmount);
+        const ledgerSavings = clampNonNegative(totalSavingsAgg[0]?.totalSavings);
+
         return res.json({
             status: 'SUCCESS',
             stat,
-            totalSavings: clampNonNegative(totalSavingsAgg[0]?.totalSavings),
+            totalProcessedAmount: processedAmount,
+            totalSavings: ledgerSavings || clampNonNegative(Math.round(processedAmount * safeSavingsPercentage)),
             totalWalletBalance: clampNonNegative(totalWalletAgg[0]?.totalWalletBalance)
         });
     } catch (error) {
@@ -132,8 +146,13 @@ export const getPartnerAnalytics = async (req, res) => {
 export const getPartnerSavingsBehavior = async (req, res) => {
     try {
         const { name } = req.partner;
+        const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
+        const safeSavingsPercentage =
+            Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
+                ? savingsPercentage
+                : 0.1;
 
-        const [summaryAgg, behavior] = await Promise.all([
+        const [summaryAgg, behavior, processedEventsByUser] = await Promise.all([
             Ledger.aggregate([
                 { $match: { account: "USER_SAVINGS" } },
                 {
@@ -145,7 +164,7 @@ export const getPartnerSavingsBehavior = async (req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.partnerName": name } },
+                { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
                 {
                     $group: {
                         _id: null,
@@ -174,7 +193,7 @@ export const getPartnerSavingsBehavior = async (req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.partnerName": name } },
+                { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
                 {
                     $group: {
                         _id: "$userId",
@@ -204,18 +223,54 @@ export const getPartnerSavingsBehavior = async (req, res) => {
                         lastSavedAt: 1
                     }
                 }
+            ]),
+            Event.aggregate([
+                { $match: { partnerName: name, status: "PROCESSED", userId: { $type: "objectId" } } },
+                {
+                    $group: {
+                        _id: "$userId",
+                        totalAmount: { $sum: "$amount" },
+                        processedEvents: { $sum: 1 },
+                        lastSavedAt: { $max: "$createdAt" }
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "_id",
+                        foreignField: "_id",
+                        as: "user"
+                    }
+                },
+                { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+                {
+                    $project: {
+                        _id: 0,
+                        userId: "$_id",
+                        phoneNumber: "$user.phoneNumber",
+                        totalSaved: { $round: [{ $multiply: ["$totalAmount", safeSavingsPercentage] }, 0] },
+                        savingsEvents: "$processedEvents",
+                        lastSavedAt: 1
+                    }
+                },
+                { $sort: { totalSaved: -1 } },
+                { $limit: 50 }
             ])
         ]);
 
         const summary = summaryAgg[0] || { totalSavings: 0, savingsEntries: 0, uniqueUsers: 0 };
+        const effectiveUsers = behavior.length ? behavior : processedEventsByUser;
+        const totalFromUsers = effectiveUsers.reduce((sum, user) => sum + clampNonNegative(user.totalSaved), 0);
+        const entriesFromUsers = effectiveUsers.reduce((sum, user) => sum + (Number(user.savingsEvents) || 0), 0);
 
         return res.json({
             status: "SUCCESS",
             summary: {
-                ...summary,
-                totalSavings: clampNonNegative(summary.totalSavings)
+                totalSavings: clampNonNegative(summary.totalSavings) || clampNonNegative(totalFromUsers),
+                savingsEntries: summary.savingsEntries || entriesFromUsers,
+                uniqueUsers: summary.uniqueUsers || effectiveUsers.length
             },
-            users: behavior.map((user) => ({
+            users: effectiveUsers.map((user) => ({
                 ...user,
                 totalSaved: clampNonNegative(user.totalSaved)
             }))

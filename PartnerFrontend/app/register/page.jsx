@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getApiBase, request, setApiBase, setPartnerCreds } from "../../lib/api";
+import { getApiBase, request, setApiBase, setPartnerCreds, setPartnerName } from "../../lib/api";
 
 export default function PartnerRegisterPage() {
   const router = useRouter();
@@ -22,6 +22,7 @@ export default function PartnerRegisterPage() {
         body: JSON.stringify(form)
       });
       setPartnerCreds({ apiKey: result.partner.apiKey, apiSecret: result.partner.apiSecret });
+      setPartnerName(result.partner?.name || form.name);
       sessionStorage.setItem(
         "partner_security_notice",
         result.securityNotice ||
