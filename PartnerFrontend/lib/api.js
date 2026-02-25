@@ -55,7 +55,13 @@ export const clearPartnerCreds = () => {
 
 async function parseResponse(response) {
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.reason || data.error || "Request failed");
+  if (!response.ok) {
+    const error = new Error(data.reason || data.error || "Request failed");
+    error.code = data.code || null;
+    error.details = data.details || null;
+    error.providerResponse = data.providerResponse || null;
+    throw error;
+  }
   return data;
 }
 

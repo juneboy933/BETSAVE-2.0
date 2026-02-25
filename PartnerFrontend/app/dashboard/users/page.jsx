@@ -5,6 +5,8 @@ import { getPartnerCreds, signedRequest } from "../../../lib/api";
 
 export default function PartnerDashboardUsers() {
   const [phone, setPhone] = useState("");
+  const [otpPhone, setOtpPhone] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [users, setUsers] = useState([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -22,7 +24,7 @@ export default function PartnerDashboardUsers() {
         return true;
       })
       .sort((a, b) => {
-        const statusRank = (value) => (value === "ACTIVE" ? 0 : 1);
+        const statusRank = (value) => ({ VERIFIED: 0, ACTIVE: 1, PENDING: 2, SUSPENDED: 3 }[value] ?? 9);
         const statusDelta = statusRank(a.status) - statusRank(b.status);
         if (statusDelta !== 0) return statusDelta;
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -53,22 +55,57 @@ export default function PartnerDashboardUsers() {
     }
   };
 
-  const registerUser = async () => {
+  const registerUser = async (autoSavingsEnabled) => {
     try {
       setError("");
+      setMessage("");
       const creds = getPartnerCreds();
-      await signedRequest({
+      const result = await signedRequest({
         method: "POST",
         path: "/api/v1/partners/users/register",
-        body: { phone },
+        body: { phone, autoSavingsEnabled },
         apiKey: creds.apiKey,
         apiSecret: creds.apiSecret
       });
-      setMessage("User registered.");
+
+      if (result.requiresOtp) {
+        setOtpPhone(result.phoneNumber || phone);
+        setMessage("OTP request accepted. Ask the user to enter OTP below to complete verification.");
+      } else {
+        setMessage(
+          autoSavingsEnabled
+            ? "Auto-savings enabled for user."
+            : "User registered without auto-savings."
+        );
+      }
       setPhone("");
       await loadUsers();
     } catch (err) {
-      setError(err.message);
+      const providerDetails = err.providerResponse ? ` | provider: ${JSON.stringify(err.providerResponse)}` : "";
+      setError(`${err.code ? `[${err.code}] ` : ""}${err.message}${err.details ? ` | details: ${err.details}` : ""}${providerDetails}`);
+    }
+  };
+
+  const verifyUserOtp = async () => {
+    try {
+      setError("");
+      setMessage("");
+      const creds = getPartnerCreds();
+      const result = await signedRequest({
+        method: "POST",
+        path: "/api/v1/partners/users/verify-otp",
+        body: { phone: otpPhone, otp: otpCode },
+        apiKey: creds.apiKey,
+        apiSecret: creds.apiSecret
+      });
+      setMessage(
+        `OTP verified. ${result.partnerUser?.phoneNumber || otpPhone} is now ${result.partnerUser?.status || "VERIFIED"}.`
+      );
+      setOtpCode("");
+      await loadUsers();
+    } catch (err) {
+      const providerDetails = err.providerResponse ? ` | provider: ${JSON.stringify(err.providerResponse)}` : "";
+      setError(`${err.code ? `[${err.code}] ` : ""}${err.message}${err.details ? ` | details: ${err.details}` : ""}${providerDetails}`);
     }
   };
 
@@ -81,13 +118,23 @@ export default function PartnerDashboardUsers() {
   return (
     <article className="card space-y-3">
       <h2 className="text-lg font-bold">Partner Users</h2>
-      <div className="grid gap-2 md:grid-cols-[1fr_auto_auto]">
+      <div className="grid gap-2 md:grid-cols-[1fr_auto_auto_auto]">
         <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+254700000000" />
-        <button className="btn" onClick={registerUser}>
-          Register User
+        <button className="btn" onClick={() => registerUser(true)}>
+          Enable Auto-Savings
+        </button>
+        <button className="btn-secondary" onClick={() => registerUser(false)}>
+          Register Manual
         </button>
         <button className="btn-secondary" onClick={loadUsers}>
           Refresh
+        </button>
+      </div>
+      <div className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
+        <input className="input" value={otpPhone} onChange={(e) => setOtpPhone(e.target.value)} placeholder="OTP phone (+254...)" />
+        <input className="input" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} placeholder="4-digit OTP" />
+        <button className="btn" onClick={verifyUserOtp}>
+          Verify OTP
         </button>
       </div>
       <div className="grid gap-2 md:grid-cols-[1fr_220px_220px]">
@@ -103,6 +150,8 @@ export default function PartnerDashboardUsers() {
           onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
         >
           <option value="ALL">All Statuses</option>
+          <option value="PENDING">PENDING</option>
+          <option value="VERIFIED">VERIFIED</option>
           <option value="ACTIVE">ACTIVE</option>
           <option value="SUSPENDED">SUSPENDED</option>
         </select>
@@ -129,6 +178,7 @@ export default function PartnerDashboardUsers() {
               <th>Phone</th>
               <th>Source</th>
               <th>Status</th>
+              <th>Auto-Savings</th>
               <th>Created</th>
             </tr>
           </thead>
@@ -138,12 +188,13 @@ export default function PartnerDashboardUsers() {
                 <td>{u.phoneNumber}</td>
                 <td>{u.source}</td>
                 <td>{u.status}</td>
+                <td>{u.autoSavingsEnabled ? "ON" : "OFF"}</td>
                 <td>{new Date(u.createdAt).toLocaleString()}</td>
               </tr>
             ))}
             {pagedUsers.length === 0 && (
               <tr>
-                <td colSpan={4} className="text-center text-slate-500">
+                <td colSpan={5} className="text-center text-slate-500">
                   No users loaded.
                 </td>
               </tr>

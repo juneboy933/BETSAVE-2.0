@@ -31,8 +31,24 @@ const partnerUserSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["ACTIVE", "SUSPENDED"],
-            default: "ACTIVE"
+            enum: ["PENDING", "VERIFIED", "ACTIVE", "SUSPENDED"],
+            default: "PENDING"
+        },
+        hashedOTP: {
+            type: String,
+            default: null
+        },
+        otpExpiresAt: {
+            type: Date,
+            default: null
+        },
+        otpAttempts: {
+            type: Number,
+            default: 0
+        },
+        autoSavingsEnabled: {
+            type: Boolean,
+            default: false
         }
     },
     { timestamps: true }

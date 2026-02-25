@@ -11,7 +11,9 @@ export default function PartnerLoginPage() {
   const [form, setForm] = useState({ apiKey: "", apiSecret: "" });
   const [error, setError] = useState("");
 
-  useEffect(() => setApiBaseInput(getApiBase()), []);
+  useEffect(() => {
+    setApiBaseInput(getApiBase());
+  }, []);
 
   const onLogin = async () => {
     try {

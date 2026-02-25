@@ -7,6 +7,7 @@ import { getAdminToken, request } from "../../../lib/api";
 export default function AdminDashboardUsers() {
   const router = useRouter();
   const [users, setUsers] = useState([]);
+  const [selectedUserForPartners, setSelectedUserForPartners] = useState(null);
   const [error, setError] = useState("");
   const [filters, setFilters] = useState({ phone: "", status: "ALL", partner: "" });
   const [currentPage, setCurrentPage] = useState(1);
@@ -115,7 +116,17 @@ export default function AdminDashboardUsers() {
                 <td>{u.phoneNumber}</td>
                 <td>{u.status}</td>
                 <td>{String(u.verified)}</td>
-                <td>{u.partners?.length ? u.partners.join(", ") : "-"}</td>
+                <td>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => setSelectedUserForPartners(u)}
+                    disabled={!u.partnerMemberships?.length}
+                  >
+                    {u.partnerMemberships?.length
+                      ? `View Partners (${u.partnerCount || u.partnerMemberships.length})`
+                      : "No Partners"}
+                  </button>
+                </td>
                 <td>{new Date(u.createdAt).toLocaleString()}</td>
                 <td>
                   <button className="btn" onClick={() => router.push(`/dashboard/users/${u._id}`)}>
@@ -149,6 +160,51 @@ export default function AdminDashboardUsers() {
           Next
         </button>
       </div>
+
+      {selectedUserForPartners && (
+        <section className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <article className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">User Partner Memberships</h3>
+                <p className="text-sm text-slate-600">{selectedUserForPartners.phoneNumber}</p>
+              </div>
+              <button className="btn-secondary" onClick={() => setSelectedUserForPartners(null)}>
+                Close
+              </button>
+            </div>
+
+            {selectedUserForPartners.partnerMemberships?.length ? (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Partner</th>
+                      <th>Status</th>
+                      <th>Source</th>
+                      <th>Auto-Savings</th>
+                      <th>Linked At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedUserForPartners.partnerMemberships.map((membership) => (
+                      <tr key={`${selectedUserForPartners._id}-${membership.name}`}>
+                        <td>{membership.name}</td>
+                        <td>{membership.status}</td>
+                        <td>{membership.source}</td>
+                        <td>{membership.autoSavingsEnabled ? "ON" : "OFF"}</td>
+                        <td>{membership.linkedAt ? new Date(membership.linkedAt).toLocaleString() : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">No partner memberships found for this user.</p>
+            )}
+          </article>
+        </section>
+      )}
     </article>
   );
 }

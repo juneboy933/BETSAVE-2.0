@@ -13,7 +13,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={`${bodyFont.variable} ${headingFont.variable}`}>
-        <main className="mx-auto min-h-screen w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-10">{children}</main>
+        <main className="mx-auto min-h-screen w-full px-4 py-6 sm:px-6 lg:w-[80vw] lg:px-8 xl:px-10">{children}</main>
       </body>
     </html>
   );

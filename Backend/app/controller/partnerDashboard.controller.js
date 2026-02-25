@@ -2,7 +2,6 @@ import Event from '../../database/models/event.model.js';
 import Ledger from "../../database/models/ledger.model.js";
 import PartnerNotification from "../../database/models/partnerNotification.model.js";
 import PartnerUser from "../../database/models/partnerUser.model.js";
-import Wallet from "../../database/models/wallet.model.js";
 
 const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
 const normalizeProcessedSavings = (event, savingsAmount) => {
@@ -85,7 +84,7 @@ export const getPartnerAnalytics = async (req, res) => {
                 ? savingsPercentage
                 : 0.1;
     
-        const [stat, processedAmountAgg, totalSavingsAgg, totalWalletAgg] = await Promise.all([
+        const [stat, processedAmountAgg, totalSavingsAgg, partnerScopedWalletAgg] = await Promise.all([
             Event.aggregate([
                 { $match: { partnerName: name } },
                 {
@@ -114,31 +113,30 @@ export const getPartnerAnalytics = async (req, res) => {
                 { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
                 { $group: { _id: null, totalSavings: { $sum: "$amount" } } }
             ]),
-            Wallet.aggregate([
-                { $match: { balance: { $gt: 0 } } },
+            Ledger.aggregate([
+                { $match: { account: "USER_SAVINGS", userId: { $type: "objectId" } } },
                 {
                     $lookup: {
                         from: "events",
-                        let: { walletUserId: "$userId" },
-                        pipeline: [
-                            {
-                                $match: {
-                                    $expr: {
-                                        $and: [
-                                            { $eq: ["$userId", "$$walletUserId"] },
-                                            { $eq: ["$partnerName", name] },
-                                            { $eq: ["$status", "PROCESSED"] }
-                                        ]
-                                    }
-                                }
-                            },
-                            { $limit: 1 }
-                        ],
-                        as: "partnerEvent"
+                        localField: "eventId",
+                        foreignField: "eventId",
+                        as: "event"
                     }
                 },
-                { $match: { partnerEvent: { $ne: [] } } },
-                { $group: { _id: null, totalWalletBalance: { $sum: "$balance" } } }
+                { $unwind: "$event" },
+                { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
+                {
+                    $group: {
+                        _id: "$userId",
+                        partnerAttributedBalance: { $sum: "$amount" }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalWalletBalance: { $sum: "$partnerAttributedBalance" }
+                    }
+                }
             ])
         ]);
     
@@ -150,7 +148,7 @@ export const getPartnerAnalytics = async (req, res) => {
             stat,
             totalProcessedAmount: processedAmount,
             totalSavings: ledgerSavings || clampNonNegative(Math.round(processedAmount * safeSavingsPercentage)),
-            totalWalletBalance: clampNonNegative(totalWalletAgg[0]?.totalWalletBalance)
+            totalWalletBalance: clampNonNegative(partnerScopedWalletAgg[0]?.totalWalletBalance)
         });
     } catch (error) {
         return res.status(500).json({
@@ -307,13 +305,14 @@ export const getPartnerUsers = async (req, res) => {
         const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
         const skip = (page - 1) * limit;
 
+        const userQuery = { partnerId, status: { $in: ["PENDING", "VERIFIED", "ACTIVE"] } };
         const [partnerUsers, total] = await Promise.all([
-            PartnerUser.find({ partnerId, status: "ACTIVE" })
+            PartnerUser.find(userQuery)
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .lean(),
-            PartnerUser.countDocuments({ partnerId, status: "ACTIVE" })
+            PartnerUser.countDocuments(userQuery)
         ]);
 
         return res.json({

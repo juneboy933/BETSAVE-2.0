@@ -316,24 +316,38 @@ export const getAdminUsers = async (req, res) => {
         const userIds = users.map((user) => user._id);
         const partnerLinks = userIds.length
             ? await PartnerUser.find({ userId: { $in: userIds } })
-                .select("userId partnerName")
+                .select("userId partnerName status source autoSavingsEnabled createdAt")
+                .sort({ createdAt: -1 })
                 .lean()
             : [];
 
-        const partnersByUserId = new Map();
+        const partnerMembershipsByUserId = new Map();
         partnerLinks.forEach((link) => {
             const key = String(link.userId);
-            const current = partnersByUserId.get(key) || new Set();
-            if (link.partnerName) current.add(link.partnerName);
-            partnersByUserId.set(key, current);
+            const current = partnerMembershipsByUserId.get(key) || new Map();
+            const partnerKey = String(link.partnerName || "").trim();
+            if (!partnerKey) return;
+            if (!current.has(partnerKey)) {
+                current.set(partnerKey, {
+                    name: partnerKey,
+                    status: link.status || "UNKNOWN",
+                    source: link.source || "UNKNOWN",
+                    autoSavingsEnabled: Boolean(link.autoSavingsEnabled),
+                    linkedAt: link.createdAt || null
+                });
+            }
+            partnerMembershipsByUserId.set(key, current);
         });
 
         const enrichedUsers = users.map((user) => {
-            const partners = [...(partnersByUserId.get(String(user._id)) || new Set())];
+            const membershipsMap = partnerMembershipsByUserId.get(String(user._id)) || new Map();
+            const partnerMemberships = [...membershipsMap.values()];
+            const partners = partnerMemberships.map((membership) => membership.name);
             return {
                 ...user,
                 partners,
-                partnerCount: partners.length
+                partnerCount: partners.length,
+                partnerMemberships
             };
         });
 

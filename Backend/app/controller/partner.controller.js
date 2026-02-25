@@ -1,6 +1,9 @@
 import { registerPartner } from "../../service/registerPartner.service.js";
 import { registerPartnerUser } from "../../service/registerPartnerUser.service.js";
 import Partner from "../../database/models/partner.model.js";
+import PartnerUser from "../../database/models/partnerUser.model.js";
+import User from "../../database/models/user.model.js";
+import { sendOTP, verifyOTP } from "../../service/otp.service.js";
 import crypto from "crypto";
 
 const CREDENTIALS_SECURITY_NOTICE =
@@ -142,19 +145,157 @@ export const registerUserFromPartner = async (req, res) => {
             });
         }
 
-        const { phone } = req.body;
+        const { phone, autoSavingsEnabled } = req.body;
         const result = await registerPartnerUser({
             partner: req.partner,
-            phone
+            phone,
+            autoSavingsEnabled
         });
+
+        let otp = null;
+        let otpProviderResponse = null;
+        if (result.requiresOtp) {
+            otp = await sendOTP({
+                partnerId: req.partner.id,
+                phone: result.phoneNumber
+            });
+
+            if (!otp.success) {
+                const otpStatusCodeByCode = {
+                    INVALID_PARTNER: 400,
+                    INVALID_PHONE: 400,
+                    OTP_PROVIDER_CONFIG_MISSING: 500,
+                    OTP_PROVIDER_CONFIG_INVALID: 500,
+                    OTP_PROVIDER_TIMEOUT: 504,
+                    OTP_PROVIDER_REJECTED: 502,
+                    OTP_PROVIDER_INVALID_RESPONSE: 502,
+                    OTP_PROVIDER_TLS_SNI: 502,
+                    OTP_PROVIDER_ERROR: 502
+                };
+                const otpStatusCode = otpStatusCodeByCode[otp.code] || 502;
+
+                return res.status(otpStatusCode).json({
+                    status: "FAILED",
+                    reason: "User created but OTP delivery failed",
+                    code: otp.code || "OTP_DELIVERY_FAILED",
+                    details: otp.error,
+                    providerResponse: otp.providerResponse || null
+                });
+            }
+            otpProviderResponse = otp.providerResponse || null;
+        }
+
+        const structuredOtp = result.requiresOtp
+            ? {
+                required: true,
+                requestAccepted: true,
+                delivered: false,
+                deliveryGuaranteed: false,
+                message: "OTP request accepted by provider. Delivery to handset is asynchronous.",
+                provider: otpProviderResponse
+                    ? {
+                        status: otpProviderResponse.status || null,
+                        statusCode: otpProviderResponse.statusCode || null,
+                        reason: otpProviderResponse.reason || null,
+                        transactionId: otpProviderResponse.transactionId || null,
+                        mobile: otpProviderResponse.mobile || null,
+                        requestTime: otpProviderResponse.requestTime || null,
+                        raw: otpProviderResponse
+                    }
+                    : null
+            }
+            : {
+                required: false,
+                requestAccepted: false,
+                delivered: false,
+                deliveryGuaranteed: false,
+                message: "OTP not required because user is already verified.",
+                provider: null
+            };
 
         return res.status(201).json({
             status: "SUCCESS",
-            ...result
+            ...result,
+            otpSent: result.requiresOtp,
+            otpProviderResponse,
+            otp: structuredOtp
         });
     } catch (error) {
         const statusCode = error.message === "Invalid phone number" ? 400 : 500;
         return res.status(statusCode).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const verifyPartnerUserOtp = async (req, res) => {
+    try {
+        if (!req.partner) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Partner not authenticated"
+            });
+        }
+
+        const { phone, otp } = req.body;
+        if (!phone || !otp) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "phone and otp are required"
+            });
+        }
+
+        const normalizedPhone = phone.trim();
+        await verifyOTP({
+            partnerId: req.partner.id,
+            phone: normalizedPhone,
+            inputOTP: String(otp).trim()
+        });
+
+        const [partnerUser, user] = await Promise.all([
+            PartnerUser.findOneAndUpdate(
+                { partnerId: req.partner.id, phoneNumber: normalizedPhone },
+                { $set: { status: "VERIFIED" } },
+                { new: true }
+            ),
+            User.findOneAndUpdate(
+                { phoneNumber: normalizedPhone },
+                { $set: { verified: true, status: "ACTIVE" } },
+                { new: true }
+            )
+        ]);
+
+        return res.json({
+            status: "SUCCESS",
+            message: "OTP verified successfully",
+            partnerUser: partnerUser
+                ? {
+                    id: partnerUser._id,
+                    phoneNumber: partnerUser.phoneNumber,
+                    status: partnerUser.status,
+                    autoSavingsEnabled: !!partnerUser.autoSavingsEnabled
+                }
+                : null,
+            user: user
+                ? {
+                    id: user._id,
+                    phoneNumber: user.phoneNumber,
+                    verified: user.verified,
+                    status: user.status
+                }
+                : null
+        });
+    } catch (error) {
+        const knownErrors = new Set([
+            "OTP not found for this phone number",
+            "Invalid OTP format",
+            "OTP expired.",
+            "Too many OTP attempts. Please request a new OTP.",
+            "Invalid OTP. Please try again."
+        ]);
+
+        return res.status(knownErrors.has(error.message) ? 400 : 500).json({
             status: "FAILED",
             reason: error.message
         });

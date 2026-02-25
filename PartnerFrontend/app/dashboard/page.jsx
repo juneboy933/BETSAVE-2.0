@@ -22,6 +22,8 @@ export default function PartnerDashboardOverview() {
   const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
   const secureStorageNotice =
     "Store your API key and API secret in a backend secret manager and never expose them in browser code.";
+  const loginNotice =
+    "Keep these credentials safe. You will need the same API Key and API Secret to login again.";
 
   const load = async () => {
     try {
@@ -141,9 +143,10 @@ export default function PartnerDashboardOverview() {
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-base font-bold text-amber-900">Partner API Credentials</h3>
           <button className="btn-secondary" onClick={loadCredentials}>
-            Load Saved Credentials
+            Load Credentials
           </button>
         </div>
+        <p className="mb-2 text-sm font-bold text-amber-900">{loginNotice}</p>
         <p className="mb-3 text-sm font-semibold text-amber-900">
           {credentialsMessage || secureStorageNotice}
         </p>

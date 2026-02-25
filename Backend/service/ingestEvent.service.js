@@ -12,11 +12,8 @@ export const ingestEvent = async (incomingEvent) => {
         return { status: "SKIPPED", reason: "Event already processed" };
     }
 
-    // Find user
-    const user = await User.findOne({ phoneNumber: phone });
-
-     // Add !user.verified later when we verify via safaricom
-    if (!user) {
+    const partner = await Partner.findOne({ name: partnerName }).select("_id name");
+    if (!partner) {
         await Event.create({
             eventId,
             userId: null,
@@ -27,7 +24,66 @@ export const ingestEvent = async (incomingEvent) => {
             status: "FAILED"
         });
 
+        return { status: "FAILED", reason: "Partner not found" };
+    }
+
+    // Find user
+    const user = await User.findOne({ phoneNumber: phone });
+    if (!user || !user.verified) {
+        await Event.create({
+            eventId,
+            userId: user?._id || null,
+            type,
+            phone,
+            partnerName,
+            amount,
+            status: "FAILED"
+        });
+
         return { status: "FAILED", reason: "User not found or not verified" };
+    }
+
+    const partnerUser = await PartnerUser.findOne({ partnerId: partner._id, userId: user._id });
+    if (!partnerUser) {
+        await Event.create({
+            eventId,
+            userId: user._id,
+            type,
+            phone,
+            partnerName,
+            amount,
+            status: "FAILED"
+        });
+
+        return { status: "FAILED", reason: "User is not linked to this partner" };
+    }
+
+    if (partnerUser.status !== "VERIFIED" && partnerUser.status !== "ACTIVE") {
+        await Event.create({
+            eventId,
+            userId: user._id,
+            type,
+            phone,
+            partnerName,
+            amount,
+            status: "FAILED"
+        });
+
+        return { status: "FAILED", reason: "User is pending verification for this partner" };
+    }
+
+    if (!partnerUser.autoSavingsEnabled) {
+        await Event.create({
+            eventId,
+            userId: user._id,
+            type,
+            phone,
+            partnerName,
+            amount,
+            status: "FAILED"
+        });
+
+        return { status: "FAILED", reason: "Auto-savings is not enabled for this user" };
     }
 
     // Record event as RECEIVED
@@ -40,24 +96,6 @@ export const ingestEvent = async (incomingEvent) => {
         amount,
         status: "RECEIVED"
     });
-
-    const partner = await Partner.findOne({ name: partnerName }).select("_id name");
-    if (partner) {
-        await PartnerUser.findOneAndUpdate(
-            { partnerId: partner._id, userId: user._id },
-            {
-                $setOnInsert: {
-                    partnerId: partner._id,
-                    partnerName: partner.name,
-                    userId: user._id,
-                    phoneNumber: phone,
-                    source: "INFERRED",
-                    status: "ACTIVE"
-                }
-            },
-            { upsert: true }
-        );
-    }
 
     return {
         status: "RECEIVED",

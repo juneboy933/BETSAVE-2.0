@@ -23,15 +23,15 @@ h4 {
 }
 
 .brand-title {
-  @apply text-base font-semibold text-slate-900;
+  @apply text-lg font-semibold text-slate-900;
 }
 
 .brand-subtitle {
-  @apply text-xs text-slate-500;
+  @apply text-sm text-slate-500;
 }
 
 .nav-shell {
-  @apply flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm;
+  @apply flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm;
 }
 
 .public-shell {
@@ -71,23 +71,23 @@ h4 {
 }
 
 .card {
-  @apply rounded-2xl border border-slate-200 bg-white p-5 shadow-sm;
+  @apply rounded-2xl border border-slate-200 bg-white p-6 shadow-sm;
 }
 
 .label {
-  @apply mb-1 mt-3 block text-sm font-semibold text-slate-600 tracking-wide;
+  @apply mb-2 mt-4 block text-base font-semibold text-slate-600 tracking-wide;
 }
 
 .input {
-  @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-brand/20 transition focus:ring-2;
+  @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base outline-none ring-brand/20 transition focus:ring-2;
 }
 
 .btn {
-  @apply inline-flex items-center justify-center rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand/90;
+  @apply inline-flex items-center justify-center rounded-xl bg-brand px-5 py-3 text-base font-semibold text-white transition hover:bg-brand/90;
 }
 
 .btn-secondary {
-  @apply inline-flex items-center justify-center rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700;
+  @apply inline-flex items-center justify-center rounded-xl bg-slate-800 px-5 py-3 text-base font-semibold text-white transition hover:bg-slate-700;
 }
 
 .table-wrap {
@@ -95,7 +95,7 @@ h4 {
 }
 
 .table {
-  @apply min-w-full border-separate text-sm;
+  @apply min-w-full border-separate text-base;
   border-spacing: 12px 10px;
 }
 
@@ -120,7 +120,7 @@ h4 {
 }
 
 .sidebar-link {
-  @apply block rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100;
+  @apply block rounded-lg px-4 py-3 text-base font-semibold text-slate-700 transition hover:bg-slate-100;
 }
 
 .sidebar-link.active {
@@ -128,11 +128,11 @@ h4 {
 }
 
 .kpi-grid {
-  @apply mt-4 grid gap-3 sm:grid-cols-3;
+  @apply mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4;
 }
 
 .kpi-tile {
-  @apply rounded-xl border border-slate-200 bg-slate-50 p-3;
+  @apply rounded-xl border border-slate-200 bg-slate-50 p-4;
 }
 
 .site-footer {
