@@ -64,7 +64,7 @@ export const creditWallet = async ({ userId, eventId, amount, reference }) => {
             {
                 session,
                 upsert: true,
-                new: true,
+                returnDocument: "after",
                 setDefaultsOnInsert: true
             }
         );

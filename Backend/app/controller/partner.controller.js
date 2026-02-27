@@ -179,6 +179,10 @@ export const registerUserFromPartner = async (req, res) => {
                     reason: "User created but OTP delivery failed",
                     code: otp.code || "OTP_DELIVERY_FAILED",
                     details: otp.error,
+                    providerHost: otp.providerHost || null,
+                    tlsServername: otp.tlsServername || null,
+                    providerHttpStatus: otp.providerHttpStatus || null,
+                    providerStatusCode: otp.providerStatusCode || null,
                     providerResponse: otp.providerResponse || null
                 });
             }
@@ -257,12 +261,12 @@ export const verifyPartnerUserOtp = async (req, res) => {
             PartnerUser.findOneAndUpdate(
                 { partnerId: req.partner.id, phoneNumber: normalizedPhone },
                 { $set: { status: "VERIFIED" } },
-                { new: true }
+                { returnDocument: "after" }
             ),
             User.findOneAndUpdate(
                 { phoneNumber: normalizedPhone },
                 { $set: { verified: true, status: "ACTIVE" } },
-                { new: true }
+                { returnDocument: "after" }
             )
         ]);
 

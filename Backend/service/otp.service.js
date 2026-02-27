@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import axios from 'axios';
+import https from 'https';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
 import PartnerUser from '../database/models/partnerUser.model.js';
@@ -11,16 +12,29 @@ const KENYA_PHONE_REGEX = /^\+254\d{9}$/;
 const normalizePhone = (phone) => String(phone || "").trim();
 const resolveProviderUrl = () =>
     String(process.env.CRADLEVOICE_SMS_URL || process.env.CRADLEVOICE_URL || "").trim();
+const resolveProviderTlsServername = () =>
+    String(process.env.CRADLEVOICE_TLS_SERVERNAME || "").trim();
 const toProviderPhone = (phone) => normalizePhone(phone).replace(/^\+/, "");
 
 const isProviderFailure = (data) => {
     if (!data || typeof data !== "object") return false;
     if (typeof data.success === "boolean") return data.success === false;
+    if (typeof data.error === "string" && data.error.trim()) return true;
+    if (typeof data.message === "string" && /(invalid|failed|error|denied|rejected)/i.test(data.message)) {
+        return true;
+    }
     if (typeof data.status === "string") {
         const status = data.status.toUpperCase();
         return status === "FAILED" || status === "FAIL" || status === "ERROR";
     }
     return false;
+};
+
+const extractProviderStatusCode = (data) => {
+    if (!data || typeof data !== "object") return null;
+    const raw = data.statusCode ?? data.code ?? data.status_code;
+    if (raw === undefined || raw === null) return null;
+    return String(raw).trim().toUpperCase();
 };
 
 const isProviderSuccess = (data) => {
@@ -37,6 +51,11 @@ const isProviderSuccess = (data) => {
         }
     }
     return Boolean(data.messageId || data.requestId || data.id);
+};
+
+const isJsonLikeResponse = (response) => {
+    const contentType = String(response?.headers?.["content-type"] || "").toLowerCase();
+    return contentType.includes("application/json") || typeof response?.data === "object";
 };
 
 const generateOTP = (length) => {
@@ -64,7 +83,7 @@ const storeOTP = async ({ partnerId, phone, otp }) => {
             otpExpiresAt: expiresAt,
             otpAttempts: 0
         },
-        { new: true }
+        { returnDocument: "after" }
     );
 
     if (!partnerUser) {
@@ -77,6 +96,7 @@ const storeOTP = async ({ partnerId, phone, otp }) => {
 export const sendOTP = async ({ partnerId, phone }) => {
     const normalizedPhone = normalizePhone(phone);
     const providerUrl = resolveProviderUrl();
+    const tlsServername = resolveProviderTlsServername();
 
     if (!partnerId) {
         return {
@@ -121,33 +141,52 @@ export const sendOTP = async ({ partnerId, phone }) => {
             phone: [providerPhone]
         };
     
-        const response = await axios.post(providerUrl, payload, {
+        const requestConfig = {
             headers: {
                 'Content-Type': 'application/json'
             },
             timeout: 10000
-        });
+        };
+
+        if (/^https:\/\//i.test(providerUrl) && tlsServername) {
+            requestConfig.httpsAgent = new https.Agent({
+                servername: tlsServername
+            });
+        }
+
+        const response = await axios.post(providerUrl, payload, requestConfig);
+
+        const httpOk = response.status >= 200 && response.status < 300;
+        const jsonLike = isJsonLikeResponse(response);
+        const providerStatusCode = extractProviderStatusCode(response.data);
 
         if (isProviderFailure(response.data)) {
             return {
                 success: false,
                 code: "OTP_PROVIDER_REJECTED",
                 error: "OTP provider rejected the request",
+                providerHttpStatus: response.status,
                 providerResponse: response.data
             };
         }
 
-        if (!isProviderSuccess(response.data)) {
+        const providerStatusCodeLooksSuccessful = ["200", "201", "202", "00", "0"].includes(providerStatusCode);
+
+        if (!httpOk || !jsonLike || (!isProviderSuccess(response.data) && !providerStatusCodeLooksSuccessful)) {
             return {
                 success: false,
                 code: "OTP_PROVIDER_INVALID_RESPONSE",
-                error: "OTP provider returned an unexpected response shape",
+                error: "OTP provider returned an unexpected response. Verify CRADLEVOICE_SMS_URL points to the API endpoint.",
+                providerHttpStatus: response.status,
+                providerStatusCode,
                 providerResponse: response.data
             };
         }
     
         return {
             success: true,
+            providerHttpStatus: response.status,
+            providerStatusCode,
             providerResponse: response.data
         };
     } catch (err){
@@ -155,10 +194,18 @@ export const sendOTP = async ({ partnerId, phone }) => {
         console.error("Error sending OTP:", providerResponse || err.message);
         const errorText = String(err.message || "").toLowerCase();
         if (errorText.includes("unrecognized name")) {
+            let providerHost = null;
+            try {
+                providerHost = new URL(providerUrl).hostname;
+            } catch {
+                providerHost = null;
+            }
             return {
                 success: false,
                 code: "OTP_PROVIDER_TLS_SNI",
-                error: "TLS/SNI mismatch with OTP provider host. Verify CRADLEVOICE_SMS_URL host and endpoint path.",
+                error: "TLS/SNI mismatch with OTP provider host. Verify CRADLEVOICE_SMS_URL and set CRADLEVOICE_TLS_SERVERNAME if certificate host differs.",
+                providerHost,
+                tlsServername: tlsServername || null,
                 providerResponse
             };
         }
@@ -213,4 +260,3 @@ export const verifyOTP = async ({ partnerId, phone, inputOTP }) => {
         partnerUser
     };
 }
-

@@ -465,7 +465,7 @@ export const updatePartnerStatus = async (req, res) => {
         const partner = await Partner.findByIdAndUpdate(
             partnerId,
             { $set: { status } },
-            { new: true }
+            { returnDocument: "after" }
         ).select("name status webhookUrl updatedAt");
 
         if (!partner) {
@@ -535,7 +535,7 @@ export const suspendUser = async (req, res) => {
                     }
                 }
             },
-            { new: true }
+            { returnDocument: "after" }
         ).select("_id phoneNumber status suspension");
 
         if (!user) {
@@ -658,7 +658,7 @@ export const activateUser = async (req, res) => {
                     "suspension.suspendedAt": 1
                 }
             },
-            { new: true }
+            { returnDocument: "after" }
         ).select("_id phoneNumber status");
 
         if (!user) {
