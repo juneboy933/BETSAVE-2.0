@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getAdminToken, request } from "../../../../lib/api";
 
 export default function AdminPartnerManagePage() {
@@ -14,7 +14,7 @@ export default function AdminPartnerManagePage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!partnerId) return;
     try {
       setError("");
@@ -25,11 +25,19 @@ export default function AdminPartnerManagePage() {
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, [partnerId]);
 
   useEffect(() => {
     load();
-  }, [partnerId]);
+  }, [load]);
+
+  useEffect(() => {
+    const onAdminModeChanged = () => {
+      load();
+    };
+    window.addEventListener("admin-mode-changed", onAdminModeChanged);
+    return () => window.removeEventListener("admin-mode-changed", onAdminModeChanged);
+  }, [load]);
 
   const updateStatus = async (status) => {
     if (!partnerId) return;

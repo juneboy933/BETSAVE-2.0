@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getAdminToken, request } from "../../../lib/api";
 
 export default function AdminDashboardSavings() {
   const [summary, setSummary] = useState(null);
   const [byPartner, setByPartner] = useState([]);
+  const [recentEntries, setRecentEntries] = useState([]);
   const [error, setError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
@@ -13,7 +14,7 @@ export default function AdminDashboardSavings() {
   const amountClass = () => "bg-emerald-50 text-emerald-800 font-semibold";
   const amountLabel = (value) => `+${safeAmount(value)}`;
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       setError("");
       const data = await request("/api/v1/dashboard/admin/savings", {
@@ -21,16 +22,26 @@ export default function AdminDashboardSavings() {
       });
       setSummary(data.summary || null);
       setByPartner(data.byPartner || []);
+      setRecentEntries(data.recentSavingsEntries || []);
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refresh();
     const intervalId = setInterval(refresh, 10000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    const onAdminModeChanged = () => {
+      setCurrentPage(1);
+      refresh();
+    };
+    window.addEventListener("admin-mode-changed", onAdminModeChanged);
+    return () => window.removeEventListener("admin-mode-changed", onAdminModeChanged);
+  }, [refresh]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -52,6 +63,22 @@ export default function AdminDashboardSavings() {
       </article>
 
       <article className="card">
+        {summary && (
+          <div className="stats-grid mb-4">
+            <article className="metric-tile">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Total Savings</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{summary.totalSavings || 0}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Savings Entries</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{summary.totalEntries || 0}</p>
+            </article>
+            <article className="metric-tile">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Partners Contributing</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{byPartner.length}</p>
+            </article>
+          </div>
+        )}
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -121,6 +148,41 @@ export default function AdminDashboardSavings() {
           >
             Next
           </button>
+        </div>
+      </article>
+
+      <article className="card">
+        <h3 className="mb-2 text-base font-bold">Recent Savings Ledger Entries</h3>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Event ID</th>
+                <th>User ID</th>
+                <th>Amount</th>
+                <th>Reference</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentEntries.slice(0, 15).map((entry) => (
+                <tr key={entry._id}>
+                  <td>{entry.eventId || "-"}</td>
+                  <td className="mono text-xs">{entry.userId || "-"}</td>
+                  <td className={amountClass(entry.amount)}>{amountLabel(entry.amount)}</td>
+                  <td>{entry.reference || "-"}</td>
+                  <td>{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "-"}</td>
+                </tr>
+              ))}
+              {recentEntries.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="text-center text-slate-500">
+                    No recent savings entries loaded.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </article>
     </section>

@@ -21,6 +21,12 @@ const partnerSchema = new mongoose.Schema({
         enum: ['ACTIVE', 'SUSPENDED'],
         default: 'ACTIVE'
     },
+    operatingMode: {
+        type: String,
+        enum: ["demo", "live"],
+        default: "demo",
+        index: true
+    },
     webhookUrl: {
         type: String,
         default: null

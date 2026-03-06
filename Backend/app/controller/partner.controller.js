@@ -11,7 +11,7 @@ const CREDENTIALS_SECURITY_NOTICE =
 
 export const createPartner = async (req, res) => {
     try {
-        const { name, webhookUrl } = req.body;
+        const { name, webhookUrl, operatingMode } = req.body;
 
         if(!name || !webhookUrl){
             return res.status(400).json({
@@ -20,7 +20,7 @@ export const createPartner = async (req, res) => {
             });
         }
 
-        const partner = await registerPartner({name, webhookUrl});
+        const partner = await registerPartner({name, webhookUrl, operatingMode});
 
         return res.status(201).json({
             status: 'SUCCESS',
@@ -47,7 +47,7 @@ export const loginPartner = async (req, res) => {
             });
         }
 
-        const partner = await Partner.findOne({ apiKey }).select("_id name apiKey apiSecret status webhookUrl");
+        const partner = await Partner.findOne({ apiKey }).select("_id name apiKey apiSecret status webhookUrl operatingMode");
         if (!partner) {
             return res.status(401).json({
                 status: "FAILED",
@@ -82,7 +82,8 @@ export const loginPartner = async (req, res) => {
                 name: partner.name,
                 apiKey: partner.apiKey,
                 webhookUrl: partner.webhookUrl,
-                status: partner.status
+                status: partner.status,
+                operatingMode: partner.operatingMode || "demo"
             },
             securityNotice: CREDENTIALS_SECURITY_NOTICE
         });
@@ -104,7 +105,7 @@ export const getPartnerCredentials = async (req, res) => {
         }
 
         const partner = await Partner.findById(req.partner.id)
-            .select("_id name apiKey apiSecret status");
+            .select("_id name apiKey apiSecret status operatingMode");
 
         if (!partner) {
             return res.status(404).json({
@@ -126,7 +127,88 @@ export const getPartnerCredentials = async (req, res) => {
                 apiKey: partner.apiKey,
                 apiSecret: partner.apiSecret
             },
+            operatingMode: partner.operatingMode || "demo",
             securityNotice: CREDENTIALS_SECURITY_NOTICE
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const getPartnerOperatingMode = async (req, res) => {
+    try {
+        if (!req.partner?.id) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Partner not authenticated"
+            });
+        }
+
+        const partner = await Partner.findById(req.partner.id)
+            .select("_id name status operatingMode");
+        if (!partner) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "Partner not found"
+            });
+        }
+
+        return res.json({
+            status: "SUCCESS",
+            partner: {
+                id: String(partner._id),
+                name: partner.name,
+                operatingMode: partner.operatingMode || "demo",
+                accountStatus: partner.status
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const setPartnerOperatingMode = async (req, res) => {
+    try {
+        if (!req.partner?.id) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Partner not authenticated"
+            });
+        }
+
+        const requestedMode = String(req.body?.operatingMode || "").trim().toLowerCase();
+        if (!["demo", "live"].includes(requestedMode)) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "operatingMode must be 'demo' or 'live'"
+            });
+        }
+
+        const partner = await Partner.findByIdAndUpdate(
+            req.partner.id,
+            { $set: { operatingMode: requestedMode } },
+            { returnDocument: "after" }
+        ).select("_id name operatingMode");
+        if (!partner) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "Partner not found"
+            });
+        }
+
+        return res.json({
+            status: "SUCCESS",
+            partner: {
+                id: String(partner._id),
+                name: partner.name,
+                operatingMode: partner.operatingMode || "demo"
+            }
         });
     } catch (error) {
         return res.status(500).json({

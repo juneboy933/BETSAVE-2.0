@@ -24,6 +24,7 @@ export const getPartnerCreds = () => ({
 });
 
 export const getPartnerName = () => (canUseStorage() ? localStorage.getItem("partner_name") || "" : "");
+export const getPartnerOperatingMode = () => (canUseStorage() ? localStorage.getItem("partner_operating_mode") || "demo" : "demo");
 
 export const hasPartnerCreds = () => {
   const { apiKey, apiSecret } = getPartnerCreds();
@@ -46,11 +47,18 @@ export const setPartnerName = (name) => {
   localStorage.setItem("partner_name", safeName);
 };
 
+export const setPartnerOperatingMode = (mode) => {
+  if (!canUseStorage()) return;
+  const normalized = String(mode || "").trim().toLowerCase();
+  localStorage.setItem("partner_operating_mode", normalized === "live" ? "live" : "demo");
+};
+
 export const clearPartnerCreds = () => {
   if (!canUseStorage()) return;
   localStorage.removeItem("partner_api_key");
   localStorage.removeItem("partner_api_secret");
   localStorage.removeItem("partner_name");
+  localStorage.removeItem("partner_operating_mode");
 };
 
 async function parseResponse(response) {

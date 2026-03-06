@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getAdminToken, request } from "../../../lib/api";
 
 export default function AdminDashboardOperations() {
   const [ops, setOps] = useState(null);
   const [error, setError] = useState("");
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       setError("");
       const data = await request("/api/v1/dashboard/admin/operations", {
@@ -17,13 +17,21 @@ export default function AdminDashboardOperations() {
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refresh();
     const intervalId = setInterval(refresh, 10000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    const onAdminModeChanged = () => {
+      refresh();
+    };
+    window.addEventListener("admin-mode-changed", onAdminModeChanged);
+    return () => window.removeEventListener("admin-mode-changed", onAdminModeChanged);
+  }, [refresh]);
 
   return (
     <section className="space-y-4">
@@ -90,6 +98,31 @@ export default function AdminDashboardOperations() {
                   <td colSpan={2} className="text-center text-slate-500">
                     No readiness data loaded.
                   </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="card">
+        <h3 className="mb-2 text-base font-bold">Operational Roadmap</h3>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Next Milestone</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(ops?.roadmap?.nextMilestones || []).map((item, idx) => (
+                <tr key={`${idx}-${item}`}>
+                  <td>{item}</td>
+                </tr>
+              ))}
+              {!(ops?.roadmap?.nextMilestones || []).length && (
+                <tr>
+                  <td className="text-center text-slate-500">No roadmap items returned.</td>
                 </tr>
               )}
             </tbody>

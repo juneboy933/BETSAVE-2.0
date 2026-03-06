@@ -25,5 +25,6 @@ export const sendpartnerWebhook = async ({ partnerName, payload }) => {
 
     } catch (error) {
         console.error(`Webhook failed for partner ${partnerName}:`, error.message);
+        throw error;
     }
 };

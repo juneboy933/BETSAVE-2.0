@@ -21,7 +21,13 @@ const webhookWorker = new Worker(
 
         // Minimal payload for partner
         const payload = result.status === 'PROCESSED'
-            ? { eventId, status: 'PROCESSED', savingsAmount: result.savingsAmount }
+            ? {
+                eventId,
+                status: 'PROCESSED',
+                savingsAmount: result.savingsAmount,
+                paymentStatus: result.paymentStatus || null,
+                paymentTransactionId: result.paymentTransactionId || null
+            }
             : { eventId, status: 'FAILED', reason: result.reason };
 
         await sendpartnerWebhook({ partnerName, payload });

@@ -47,7 +47,7 @@ export default function PartnerDashboardNotifications() {
   return (
     <article className="card space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Admin Notifications</h2>
+        <h2 className="text-lg font-bold">Partner Notifications</h2>
         <button className="btn" onClick={load}>
           Refresh
         </button>

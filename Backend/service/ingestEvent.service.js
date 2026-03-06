@@ -12,7 +12,7 @@ export const ingestEvent = async (incomingEvent) => {
         return { status: "SKIPPED", reason: "Event already processed" };
     }
 
-    const partner = await Partner.findOne({ name: partnerName }).select("_id name");
+    const partner = await Partner.findOne({ name: partnerName }).select("_id name operatingMode");
     if (!partner) {
         await Event.create({
             eventId,
@@ -20,12 +20,17 @@ export const ingestEvent = async (incomingEvent) => {
             type,
             phone,
             partnerName,
+            operatingMode: "demo",
             amount,
             status: "FAILED"
         });
 
         return { status: "FAILED", reason: "Partner not found" };
     }
+
+    const eventMode = String(partner.operatingMode || "demo").trim().toLowerCase() === "live"
+        ? "live"
+        : "demo";
 
     // Find user
     const user = await User.findOne({ phoneNumber: phone });
@@ -36,6 +41,7 @@ export const ingestEvent = async (incomingEvent) => {
             type,
             phone,
             partnerName,
+            operatingMode: eventMode,
             amount,
             status: "FAILED"
         });
@@ -51,6 +57,7 @@ export const ingestEvent = async (incomingEvent) => {
             type,
             phone,
             partnerName,
+            operatingMode: eventMode,
             amount,
             status: "FAILED"
         });
@@ -65,6 +72,7 @@ export const ingestEvent = async (incomingEvent) => {
             type,
             phone,
             partnerName,
+            operatingMode: eventMode,
             amount,
             status: "FAILED"
         });
@@ -79,6 +87,7 @@ export const ingestEvent = async (incomingEvent) => {
             type,
             phone,
             partnerName,
+            operatingMode: eventMode,
             amount,
             status: "FAILED"
         });
@@ -92,6 +101,7 @@ export const ingestEvent = async (incomingEvent) => {
         userId: user._id,
         phone,
         partnerName,
+        operatingMode: eventMode,
         type,
         amount,
         status: "RECEIVED"

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AnimatedNumber from "../../components/AnimatedNumber";
 import { getPartnerCreds, setPartnerCreds, signedRequest } from "../../lib/api";
 
 export default function PartnerDashboardOverview() {
   const [rows, setRows] = useState([]);
+  const [statusSummary, setStatusSummary] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRows, setTotalRows] = useState(0);
   const [credentials, setCredentials] = useState({ apiKey: "", apiSecret: "" });
@@ -38,6 +40,12 @@ export default function PartnerDashboardOverview() {
       });
       setRows(data.events || []);
       setTotalRows(Number(data.total) || 0);
+      const summary = (data.events || []).reduce((acc, item) => {
+        const key = String(item.status || "UNKNOWN").toUpperCase();
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+      setStatusSummary(Object.entries(summary).map(([status, count]) => ({ status, count })));
     } catch (err) {
       setError(err.message);
     }
@@ -84,13 +92,42 @@ export default function PartnerDashboardOverview() {
   const totalPages = Math.max(1, Math.ceil(totalRows / 10));
 
   return (
-    <article className="card">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-bold">Recent Processed Events</h2>
+    <article className="card space-y-4">
+      <section className="callout">
+        Partner dashboards support manual controls for demos. In live mode, event and user writes are restricted to
+        server-to-server integrations.
+      </section>
+
+      <div className="section-head">
+        <h2 className="text-lg font-bold">Recent Partner Events</h2>
         <button className="btn" onClick={load}>
           Refresh
         </button>
       </div>
+
+      <div className="stats-grid">
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Loaded Rows</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900"><AnimatedNumber value={rows.length} /></p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Total Event Rows</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900"><AnimatedNumber value={totalRows} /></p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Processed In View</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">
+            <AnimatedNumber value={statusSummary.find((item) => item.status === "PROCESSED")?.count || 0} />
+          </p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Failed In View</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">
+            <AnimatedNumber value={statusSummary.find((item) => item.status === "FAILED")?.count || 0} />
+          </p>
+        </article>
+      </div>
+
       {error && <p className="mb-2 text-sm font-semibold text-red-700">{error}</p>}
       <div className="table-wrap">
         <table className="table">
@@ -139,8 +176,8 @@ export default function PartnerDashboardOverview() {
         </button>
       </div>
 
-      <article className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
-        <div className="mb-3 flex items-center justify-between">
+      <article className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+        <div className="section-head">
           <h3 className="text-base font-bold text-amber-900">Partner API Credentials</h3>
           <button className="btn-secondary" onClick={loadCredentials}>
             Load Credentials

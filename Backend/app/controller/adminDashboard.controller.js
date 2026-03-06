@@ -16,6 +16,11 @@ const parsePagination = (query) => {
 };
 
 const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
+const normalizeOperatingMode = (value) => {
+    const mode = String(value || "").trim().toLowerCase();
+    return mode === "demo" ? "demo" : "live";
+};
+const resolveAdminViewMode = (req) => normalizeOperatingMode(req?.query?.operatingMode);
 
 const logAdminDecision = async (req, payload) => {
     try {
@@ -29,8 +34,9 @@ const logAdminDecision = async (req, payload) => {
     }
 };
 
-export const getAdminOverview = async (_req, res) => {
+export const getAdminOverview = async (req, res) => {
     try {
+        const operatingMode = resolveAdminViewMode(req);
         const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
         const safeSavingsPercentage =
             Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
@@ -52,9 +58,9 @@ export const getAdminOverview = async (_req, res) => {
             User.countDocuments({ status: "ACTIVE" }),
             Partner.countDocuments(),
             Partner.countDocuments({ status: "ACTIVE" }),
-            Event.countDocuments({ status: "PROCESSED" }),
+            Event.countDocuments({ status: "PROCESSED", operatingMode }),
             Event.aggregate([
-                { $match: { status: "PROCESSED" } },
+                { $match: { status: "PROCESSED", operatingMode } },
                 { $group: { _id: null, totalAmount: { $sum: "$amount" } } }
             ]),
             Wallet.aggregate([
@@ -69,7 +75,8 @@ export const getAdminOverview = async (_req, res) => {
                                     $expr: {
                                         $and: [
                                             { $eq: ["$userId", "$$walletUserId"] },
-                                            { $eq: ["$status", "PROCESSED"] }
+                                            { $eq: ["$status", "PROCESSED"] },
+                                            { $eq: ["$operatingMode", operatingMode] }
                                         ]
                                     }
                                 }
@@ -93,10 +100,16 @@ export const getAdminOverview = async (_req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.status": "PROCESSED" } },
+                {
+                    $match: {
+                        "event.status": "PROCESSED",
+                        "event.operatingMode": operatingMode
+                    }
+                },
                 { $group: { _id: null, total: { $sum: "$amount" } } }
             ]),
             Event.aggregate([
+                { $match: { operatingMode } },
                 {
                     $group: {
                         _id: "$status",
@@ -132,6 +145,7 @@ export const getAdminOverview = async (_req, res) => {
 
 export const getAdminPartners = async (req, res) => {
     try {
+        const operatingMode = resolveAdminViewMode(req);
         const { page, limit } = parsePagination(req.query);
         const skip = (page - 1) * limit;
 
@@ -143,6 +157,7 @@ export const getAdminPartners = async (req, res) => {
                 .select("name status webhookUrl createdAt")
                 .lean(),
             Event.aggregate([
+                { $match: { operatingMode } },
                 {
                     $group: {
                         _id: "$partnerName",
@@ -176,7 +191,12 @@ export const getAdminPartners = async (req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.status": "PROCESSED" } },
+                {
+                    $match: {
+                        "event.status": "PROCESSED",
+                        "event.operatingMode": operatingMode
+                    }
+                },
                 {
                     $group: {
                         _id: "$event.partnerName",
@@ -220,6 +240,7 @@ export const getAdminPartners = async (req, res) => {
 
 export const getAdminPartnerDetails = async (req, res) => {
     try {
+        const operatingMode = resolveAdminViewMode(req);
         const { partnerId } = req.params;
         if (!mongoose.Types.ObjectId.isValid(partnerId)) {
             return res.status(400).json({
@@ -230,7 +251,7 @@ export const getAdminPartnerDetails = async (req, res) => {
 
         const objectPartnerId = new mongoose.Types.ObjectId(partnerId);
         const partner = await Partner.findById(objectPartnerId)
-            .select("_id name status webhookUrl createdAt updatedAt")
+            .select("_id name status operatingMode webhookUrl createdAt updatedAt")
             .lean();
 
         if (!partner) {
@@ -242,7 +263,7 @@ export const getAdminPartnerDetails = async (req, res) => {
 
         const [eventStats, partnerUsers, savingsAgg, recentEvents] = await Promise.all([
             Event.aggregate([
-                { $match: { partnerName: partner.name } },
+                { $match: { partnerName: partner.name, operatingMode } },
                 {
                     $group: {
                         _id: "$status",
@@ -263,7 +284,7 @@ export const getAdminPartnerDetails = async (req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.partnerName": partner.name } },
+                { $match: { "event.partnerName": partner.name, "event.operatingMode": operatingMode } },
                 {
                     $group: {
                         _id: null,
@@ -272,7 +293,7 @@ export const getAdminPartnerDetails = async (req, res) => {
                     }
                 }
             ]),
-            Event.find({ partnerName: partner.name })
+            Event.find({ partnerName: partner.name, operatingMode })
                 .sort({ createdAt: -1 })
                 .limit(10)
                 .select("eventId phone status amount createdAt")
@@ -815,6 +836,7 @@ export const markAdminNotificationsRead = async (_req, res) => {
 
 export const getAdminEvents = async (req, res) => {
     try {
+        const operatingMode = resolveAdminViewMode(req);
         const { page, limit } = parsePagination(req.query);
         const skip = (page - 1) * limit;
         const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
@@ -823,9 +845,9 @@ export const getAdminEvents = async (req, res) => {
                 ? savingsPercentage
                 : 0.1;
 
-        const query = {};
+        const query = { operatingMode };
         if (req.query.status) query.status = req.query.status;
-        if (req.query.partnerName) query.partnerName = req.query.partnerName;
+        if (req.query.partnerName) query.partnerName = String(req.query.partnerName || "").trim();
         if (req.query.phone) query.phone = req.query.phone;
 
         const [events, total] = await Promise.all([
@@ -872,8 +894,9 @@ export const getAdminEvents = async (req, res) => {
     }
 };
 
-export const getAdminSavings = async (_req, res) => {
+export const getAdminSavings = async (req, res) => {
     try {
+        const operatingMode = resolveAdminViewMode(req);
         const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
         const safeSavingsPercentage =
             Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
@@ -881,6 +904,7 @@ export const getAdminSavings = async (_req, res) => {
                 : 0.1;
 
         const eventSavingsPipeline = [
+            { $match: { operatingMode } },
             {
                 $lookup: {
                     from: "ledgers",
@@ -962,10 +986,26 @@ export const getAdminSavings = async (_req, res) => {
                 },
                 { $sort: { totalSavings: -1 } }
             ]),
-            Ledger.find({ account: "USER_SAVINGS" })
-                .sort({ createdAt: -1 })
-                .limit(50)
-                .lean()
+            Ledger.aggregate([
+                { $match: { account: "USER_SAVINGS" } },
+                {
+                    $lookup: {
+                        from: "events",
+                        localField: "eventId",
+                        foreignField: "eventId",
+                        as: "event"
+                    }
+                },
+                { $unwind: "$event" },
+                {
+                    $match: {
+                        "event.status": "PROCESSED",
+                        "event.operatingMode": operatingMode
+                    }
+                },
+                { $sort: { createdAt: -1 } },
+                { $limit: 50 }
+            ])
         ]);
 
         const safeSummary = summary[0] || { totalSavings: 0, totalEntries: 0 };
@@ -991,10 +1031,11 @@ export const getAdminSavings = async (_req, res) => {
     }
 };
 
-export const getAdminOperations = async (_req, res) => {
+export const getAdminOperations = async (req, res) => {
     try {
+        const operatingMode = resolveAdminViewMode(req);
         const [failedEvents, suspendedPartners, totalPartnerUsers] = await Promise.all([
-            Event.countDocuments({ status: "FAILED" }),
+            Event.countDocuments({ status: "FAILED", operatingMode }),
             Partner.countDocuments({ status: "SUSPENDED" }),
             PartnerUser.countDocuments()
         ]);

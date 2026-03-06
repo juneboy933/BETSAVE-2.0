@@ -20,6 +20,12 @@ const eventSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    operatingMode: {
+        type: String,
+        enum: ["demo", "live"],
+        default: "demo",
+        index: true
+    },
     type: {
         type: String,
         required: true,
@@ -38,6 +44,7 @@ const eventSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 eventSchema.index({ partnerName: 1, eventId: 1 }, { unique: true });
+eventSchema.index({ partnerName: 1, operatingMode: 1, createdAt: -1 });
 eventSchema.index({ userId: 1, createdAt: -1 });
 
 const Event = mongoose.model('Event', eventSchema);

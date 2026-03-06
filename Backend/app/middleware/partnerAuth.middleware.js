@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import Partner from "../../database/models/partner.model.js";
+import { isDatabaseReady } from "../../database/config.js";
 
 const SAFE_TIME_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -12,6 +13,13 @@ const normalizePath = (url) => `/${String(url || "").replace(/^\/+/, "")}`;
 
 export const verifyPartner = async (req, res, next) => {
     try {
+        if (!isDatabaseReady()) {
+            return res.status(503).json({
+                status: "FAILED",
+                reason: "Service temporarily unavailable"
+            });
+        }
+
         const apiKey = req.headers["x-api-key"];
         const signature = req.headers["x-signature"];
         const timestamp = req.headers["x-timestamp"];
@@ -88,15 +96,21 @@ export const verifyPartner = async (req, res, next) => {
         req.partner = {
             id: partner._id,
             name: partner.name,
+            operatingMode: partner.operatingMode || "demo",
         };
 
         next();
     } catch (error) {
         console.error("verifyPartner error:", error.message);
 
+        const transientDbError =
+            /timed out|connection <monitor>|topology was destroyed|network error|ECONNRESET|ETIMEDOUT/i.test(
+                String(error.message || "")
+            );
+
         return res.status(500).json({
             status: "FAILED",
-            reason: "Partner verification failed"
+            reason: transientDbError ? "Service temporarily unavailable" : "Partner verification failed"
         });
     }
 };

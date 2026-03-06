@@ -43,6 +43,8 @@ export default function AdminDashboardUsers() {
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
   const pagedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const activeUsers = filteredUsers.filter((user) => user.status === "ACTIVE").length;
+  const usersWithPartners = filteredUsers.filter((user) => Number(user.partnerCount) > 0).length;
 
   const refresh = async () => {
     try {
@@ -93,6 +95,20 @@ export default function AdminDashboardUsers() {
           value={filters.partner}
           onChange={(e) => setFilters((prev) => ({ ...prev, partner: e.target.value }))}
         />
+      </div>
+      <div className="stats-grid">
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Users In View</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{filteredUsers.length}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Active Users</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{activeUsers}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Users With Partners</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{usersWithPartners}</p>
+        </article>
       </div>
       <p className="text-xs font-medium text-slate-500">
         Showing {filteredUsers.length} of {users.length} users (current entries first).

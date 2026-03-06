@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getPartnerCreds, signedRequest } from "../../../lib/api";
+import { getPartnerCreds, getPartnerOperatingMode, signedRequest } from "../../../lib/api";
 
 export default function PartnerDashboardUsers() {
   const [phone, setPhone] = useState("");
@@ -10,6 +10,7 @@ export default function PartnerDashboardUsers() {
   const [users, setUsers] = useState([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [operatingMode, setOperatingMode] = useState("demo");
   const [filters, setFilters] = useState({ phone: "", status: "ALL", source: "ALL" });
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
@@ -37,10 +38,13 @@ export default function PartnerDashboardUsers() {
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
   const pagedUsers = filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const activeUsers = filteredUsers.filter((user) => user.status === "ACTIVE" || user.status === "VERIFIED").length;
+  const autoSavingsUsers = filteredUsers.filter((user) => user.autoSavingsEnabled).length;
 
   const loadUsers = async () => {
     try {
       setError("");
+      setOperatingMode(getPartnerOperatingMode());
       const creds = getPartnerCreds();
       const data = await signedRequest({
         method: "GET",
@@ -118,25 +122,59 @@ export default function PartnerDashboardUsers() {
   return (
     <article className="card space-y-3">
       <h2 className="text-lg font-bold">Partner Users</h2>
-      <div className="grid gap-2 md:grid-cols-[1fr_auto_auto_auto]">
-        <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+254700000000" />
-        <button className="btn" onClick={() => registerUser(true)}>
-          Enable Auto-Savings
-        </button>
-        <button className="btn-secondary" onClick={() => registerUser(false)}>
-          Register Manual
-        </button>
-        <button className="btn-secondary" onClick={loadUsers}>
-          Refresh
-        </button>
+      {operatingMode === "demo" ? (
+        <section className="callout">
+          Demo controls are enabled below for registration and OTP walkthroughs.
+        </section>
+      ) : (
+        <section className="callout">
+          Live mode is active. User registration and OTP actions must be performed via your integrated backend only.
+        </section>
+      )}
+      <div className="stats-grid">
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Linked Users</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{filteredUsers.length}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Active Or Verified</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{activeUsers}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Auto-Savings Enabled</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{autoSavingsUsers}</p>
+        </article>
       </div>
-      <div className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
-        <input className="input" value={otpPhone} onChange={(e) => setOtpPhone(e.target.value)} placeholder="OTP phone (+254...)" />
-        <input className="input" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} placeholder="4-digit OTP" />
-        <button className="btn" onClick={verifyUserOtp}>
-          Verify OTP
-        </button>
-      </div>
+      {operatingMode === "demo" ? (
+        <>
+          <h3 className="text-base font-semibold text-slate-700">Demo User Controls</h3>
+          <div className="grid gap-2 md:grid-cols-[1fr_auto_auto_auto]">
+            <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+254700000000" />
+            <button className="btn" onClick={() => registerUser(true)}>
+              Enable Auto-Savings
+            </button>
+            <button className="btn-secondary" onClick={() => registerUser(false)}>
+              Register Manual
+            </button>
+            <button className="btn-secondary" onClick={loadUsers}>
+              Refresh
+            </button>
+          </div>
+          <div className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
+            <input className="input" value={otpPhone} onChange={(e) => setOtpPhone(e.target.value)} placeholder="OTP phone (+254...)" />
+            <input className="input" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} placeholder="4-digit OTP" />
+            <button className="btn" onClick={verifyUserOtp}>
+              Verify OTP
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={loadUsers}>
+            Refresh
+          </button>
+        </div>
+      )}
       <div className="grid gap-2 md:grid-cols-[1fr_220px_220px]">
         <input
           className="input"

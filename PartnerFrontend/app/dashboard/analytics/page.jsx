@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AnimatedNumber from "../../../components/AnimatedNumber";
 import { getPartnerCreds, signedRequest } from "../../../lib/api";
 
 export default function PartnerDashboardAnalytics() {
   const [summary, setSummary] = useState([]);
   const [totalWalletBalance, setTotalWalletBalance] = useState(0);
   const [totalProcessedAmount, setTotalProcessedAmount] = useState(0);
+  const [totalSavings, setTotalSavings] = useState(0);
   const [behavior, setBehavior] = useState([]);
   const [error, setError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -39,6 +41,7 @@ export default function PartnerDashboardAnalytics() {
       setSummary(a.stat || []);
       setTotalWalletBalance(toPositiveNumber(a.totalWalletBalance));
       setTotalProcessedAmount(toPositiveNumber(a.totalProcessedAmount));
+      setTotalSavings(toPositiveNumber(a.totalSavings));
       setBehavior(b.users || []);
     } catch (err) {
       setError(err.message);
@@ -61,21 +64,25 @@ export default function PartnerDashboardAnalytics() {
   return (
     <section className="space-y-4">
       <article className="card">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="section-head">
           <h2 className="text-lg font-bold">Savings Analytics</h2>
           <button className="btn" onClick={load}>
             Refresh
           </button>
         </div>
         {error && <p className="text-sm font-semibold text-red-700">{error}</p>}
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Total Wallet Balance</p>
-            <p className="mt-1 text-2xl font-bold">{totalWalletBalance}</p>
+        <div className="stats-grid">
+          <div className="metric-tile">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Attributed Wallet Balance</p>
+            <p className="mt-1 text-2xl font-bold"><AnimatedNumber value={totalWalletBalance} /></p>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="metric-tile">
             <p className="text-xs uppercase tracking-wide text-slate-500">Processed Event Amount</p>
-            <p className="mt-1 text-2xl font-bold">{totalProcessedAmount}</p>
+            <p className="mt-1 text-2xl font-bold"><AnimatedNumber value={totalProcessedAmount} /></p>
+          </div>
+          <div className="metric-tile">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Total Savings</p>
+            <p className="mt-1 text-2xl font-bold"><AnimatedNumber value={totalSavings} /></p>
           </div>
         </div>
       </article>

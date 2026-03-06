@@ -18,11 +18,17 @@ export const postEvent = async (req, res) => {
         if (ingestResult.status === 'FAILED') return res.status(400).json(ingestResult);
         if (ingestResult.status === 'SKIPPED') return res.status(200).json(ingestResult);
 
+        const operatingMode = String(ingestResult?.event?.operatingMode || req.partner?.operatingMode || "demo")
+            .trim()
+            .toLowerCase() === "live"
+            ? "live"
+            : "demo";
+
         // Queue the event
         await eventQueue.add('process-event', 
-            { eventId, partnerName },
+            { eventId, partnerName, operatingMode },
             {
-                jobId: `${partnerName}-${eventId}`,
+                jobId: `${partnerName}-${operatingMode}-${eventId}`,
                 attempts: 5,
                 backoff: { type: 'exponential', delay: 5000 },
                 removeOnComplete: true,
@@ -30,7 +36,7 @@ export const postEvent = async (req, res) => {
             }
         );
 
-        return res.status(200).json({ status: 'RECEIVED', eventId });
+        return res.status(200).json({ status: 'RECEIVED', eventId, operatingMode });
 
     } catch (error) {
         console.error("postEvent error:", error.message);

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getApiBase, request, setApiBase, setPartnerCreds, setPartnerName } from "../../lib/api";
+import { getApiBase, request, setApiBase, setPartnerCreds, setPartnerName, setPartnerOperatingMode } from "../../lib/api";
 
 export default function PartnerLoginPage() {
   const router = useRouter();
@@ -25,6 +25,7 @@ export default function PartnerLoginPage() {
       });
       setPartnerCreds(form);
       setPartnerName(result.partner?.name || "");
+      setPartnerOperatingMode(result.partner?.operatingMode || "demo");
       sessionStorage.setItem(
         "partner_security_notice",
         result.securityNotice ||

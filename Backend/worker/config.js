@@ -1,7 +1,10 @@
 import { Redis } from 'ioredis';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const workerConfigDir = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(workerConfigDir, '../.env') });
 
 const redisUri = process.env.REDIS_URI;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAdminToken, request } from "../../../lib/api";
 
@@ -34,8 +34,10 @@ export default function AdminDashboardPartners() {
 
   const totalPages = Math.max(1, Math.ceil(filteredPartners.length / pageSize));
   const pagedPartners = filteredPartners.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const activePartners = filteredPartners.filter((partner) => partner.status === "ACTIVE").length;
+  const totalPartnerSavings = filteredPartners.reduce((sum, partner) => sum + (Number(partner.stats?.totalSavings) || 0), 0);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       setError("");
       const data = await request("/api/v1/dashboard/admin/partners?page=1&limit=100", {
@@ -45,13 +47,22 @@ export default function AdminDashboardPartners() {
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refresh();
     const intervalId = setInterval(refresh, 10000);
     return () => clearInterval(intervalId);
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    const onAdminModeChanged = () => {
+      setCurrentPage(1);
+      refresh();
+    };
+    window.addEventListener("admin-mode-changed", onAdminModeChanged);
+    return () => window.removeEventListener("admin-mode-changed", onAdminModeChanged);
+  }, [refresh]);
 
   return (
     <article className="card space-y-3">
@@ -78,6 +89,20 @@ export default function AdminDashboardPartners() {
           <option value="SUSPENDED">SUSPENDED</option>
         </select>
       </div>
+      <div className="stats-grid">
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Partners In View</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{filteredPartners.length}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Active Partners</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{activePartners}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Savings Total</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{totalPartnerSavings}</p>
+        </article>
+      </div>
       <p className="text-xs font-medium text-slate-500">
         Showing {filteredPartners.length} of {partners.length} partners (current entries first).
       </p>
@@ -100,7 +125,7 @@ export default function AdminDashboardPartners() {
           <tbody>
             {pagedPartners.map((p) => (
               <tr key={p._id}>
-                <td className="font-mono text-xs">{p._id}</td>
+                <td className="mono text-xs">{p._id}</td>
                 <td>{p.name}</td>
                 <td>{p.status}</td>
                 <td>{p.webhookUrl || "-"}</td>

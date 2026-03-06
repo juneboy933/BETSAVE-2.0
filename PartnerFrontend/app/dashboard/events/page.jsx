@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getPartnerCreds, signedRequest } from "../../../lib/api";
+import { getPartnerCreds, getPartnerOperatingMode, signedRequest } from "../../../lib/api";
 
 export default function PartnerDashboardEvents() {
   const [form, setForm] = useState({ eventId: `BET-${Date.now()}`, phone: "", amount: 0, type: "BET_PLACED" });
   const [events, setEvents] = useState([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [operatingMode, setOperatingMode] = useState("demo");
   const [filters, setFilters] = useState({ status: "ALL", eventId: "", phone: "" });
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
@@ -24,6 +25,7 @@ export default function PartnerDashboardEvents() {
   const refresh = async () => {
     try {
       setError("");
+      setOperatingMode(getPartnerOperatingMode());
       const creds = getPartnerCreds();
       const data = await signedRequest({
         method: "GET",
@@ -80,24 +82,60 @@ export default function PartnerDashboardEvents() {
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const totalPages = Math.max(1, Math.ceil(filteredEvents.length / pageSize));
   const pagedEvents = filteredEvents.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const processedCount = filteredEvents.filter((event) => event.status === "PROCESSED").length;
+  const failedCount = filteredEvents.filter((event) => event.status === "FAILED").length;
 
   return (
     <article className="card space-y-3">
-      <h2 className="text-lg font-bold">Automated Bet Events</h2>
-      <div className="grid gap-2 md:grid-cols-2">
-        <input className="input" value={form.eventId} onChange={(e) => setForm({ ...form, eventId: e.target.value })} placeholder="Event ID" />
-        <input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Phone" />
-        <input className="input" type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="Amount" />
-        <input className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} placeholder="Type" />
+      <h2 className="text-lg font-bold">Bet Event Stream</h2>
+      {operatingMode === "demo" ? (
+        <section className="callout">
+          Demo composer below is for sandbox walkthroughs. Demo mode does not apply live wallet credits.
+        </section>
+      ) : (
+        <section className="callout">
+          Live mode is active. Event submissions affect production settlement flow and wallet credits on successful callbacks.
+        </section>
+      )}
+      <div className="stats-grid">
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Visible Events</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{filteredEvents.length}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Processed</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{processedCount}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Failed</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{failedCount}</p>
+        </article>
       </div>
-      <div className="flex gap-2">
-        <button className="btn" onClick={send}>
-          Send Event
-        </button>
-        <button className="btn-secondary" onClick={refresh}>
-          Refresh
-        </button>
-      </div>
+      {operatingMode === "demo" ? (
+        <>
+          <h3 className="text-base font-semibold text-slate-700">Demo Event Composer</h3>
+          <div className="grid gap-2 md:grid-cols-2">
+            <input className="input" value={form.eventId} onChange={(e) => setForm({ ...form, eventId: e.target.value })} placeholder="Event ID" />
+            <input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Phone" />
+            <input className="input" type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="Amount" />
+            <input className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} placeholder="Type" />
+          </div>
+          <div className="flex gap-2">
+            <button className="btn" onClick={send}>
+              Send Event
+            </button>
+            <button className="btn-secondary" onClick={refresh}>
+              Refresh
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={refresh}>
+            Refresh
+          </button>
+        </div>
+      )}
       <div className="grid gap-2 md:grid-cols-[220px_1fr_1fr]">
         <select
           className="input"

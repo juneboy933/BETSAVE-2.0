@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getAdminToken, request } from "../../../lib/api";
 
 export default function AdminDashboardEvents() {
@@ -19,7 +19,7 @@ export default function AdminDashboardEvents() {
     Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
   const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       setError("");
       const params = new URLSearchParams({ page: "1", limit: "100" });
@@ -34,13 +34,22 @@ export default function AdminDashboardEvents() {
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, [filters.phone, filters.partner, filters.status]);
 
   useEffect(() => {
     refresh();
     const intervalId = setInterval(refresh, 10000);
     return () => clearInterval(intervalId);
-  }, [filters.status, filters.partner, filters.phone]);
+  }, [refresh]);
+
+  useEffect(() => {
+    const onAdminModeChanged = () => {
+      setCurrentPage(1);
+      refresh();
+    };
+    window.addEventListener("admin-mode-changed", onAdminModeChanged);
+    return () => window.removeEventListener("admin-mode-changed", onAdminModeChanged);
+  }, [refresh]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -48,6 +57,9 @@ export default function AdminDashboardEvents() {
 
   const totalPages = Math.max(1, Math.ceil(events.length / pageSize));
   const pagedEvents = events.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const processedEvents = events.filter((event) => event.status === "PROCESSED").length;
+  const failedEvents = events.filter((event) => event.status === "FAILED").length;
+  const totalSavingsAmount = events.reduce((sum, event) => sum + (Number(event.savingsAmount) || 0), 0);
 
   return (
     <article className="card space-y-3">
@@ -81,6 +93,24 @@ export default function AdminDashboardEvents() {
           value={filters.phone}
           onChange={(e) => setFilters((prev) => ({ ...prev, phone: e.target.value }))}
         />
+      </div>
+      <div className="stats-grid">
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Events In View</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{events.length}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Processed</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{processedEvents}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Failed</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{failedEvents}</p>
+        </article>
+        <article className="metric-tile">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Savings Amount In View</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{totalSavingsAmount}</p>
+        </article>
       </div>
       <p className="text-xs font-medium text-slate-500">
         Showing {events.length} events (current entries first).

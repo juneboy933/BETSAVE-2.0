@@ -19,7 +19,12 @@ const ledgerSchema = new mongoose.Schema({
         enum: [
             "USER_SAVINGS",
             "OPERATOR_CLEARING",
-            "BANK_SETTLEMENT"
+            "BANK_SETTLEMENT",
+            "MPESA_COLLECTION",
+            "USER_WALLET_LIABILITY",
+            "WITHDRAWAL_PENDING",
+            "MPESA_DISBURSEMENT",
+            "RECON_ADJUSTMENT"
         ]
     },
 

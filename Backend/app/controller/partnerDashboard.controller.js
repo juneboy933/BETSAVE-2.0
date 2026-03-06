@@ -4,6 +4,7 @@ import PartnerNotification from "../../database/models/partnerNotification.model
 import PartnerUser from "../../database/models/partnerUser.model.js";
 
 const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
+const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const normalizeProcessedSavings = (event, savingsAmount) => {
     const normalized = clampNonNegative(savingsAmount);
     if (event.status === "PROCESSED" && (event.amount || 0) > 0) {
@@ -15,6 +16,10 @@ const normalizeProcessedSavings = (event, savingsAmount) => {
 export const getPartnerEvents = async (req, res) => {
     try {
         const { name } = req.partner;
+        const operatingMode =
+            String(req.partner?.operatingMode || "demo").trim().toLowerCase() === "live"
+                ? "live"
+                : "demo";
         const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
         const safeSavingsPercentage =
             Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
@@ -25,7 +30,7 @@ export const getPartnerEvents = async (req, res) => {
         const page = Math.max(1, Number(req.query.page) || 1);
         const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
 
-        const query = { partnerName: name };
+        const query = { partnerName: name, operatingMode };
         if (status) query.status = status;
 
         const [events, total] = await Promise.all([
@@ -78,15 +83,30 @@ export const getPartnerEvents = async (req, res) => {
 export const getPartnerAnalytics = async (req, res) => {
     try {
         const { name } = req.partner;
+        const operatingMode =
+            String(req.partner?.operatingMode || "demo").trim().toLowerCase() === "live"
+                ? "live"
+                : "demo";
         const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
         const safeSavingsPercentage =
             Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
                 ? savingsPercentage
                 : 0.1;
+        const partnerReferencePrefix = new RegExp(`^EVENT::${escapeRegex(name)}::${operatingMode}::`);
+        const legacyLiveReferencePrefix = new RegExp(`^EVENT::${escapeRegex(name)}::(?!demo::|live::)`);
+        const partnerReferenceMatch =
+            operatingMode === "live"
+                ? {
+                    $or: [
+                        { reference: partnerReferencePrefix },
+                        { reference: legacyLiveReferencePrefix }
+                    ]
+                }
+                : { reference: partnerReferencePrefix };
     
         const [stat, processedAmountAgg, totalSavingsAgg, partnerScopedWalletAgg] = await Promise.all([
             Event.aggregate([
-                { $match: { partnerName: name } },
+                { $match: { partnerName: name, operatingMode } },
                 {
                     $group: {
                         _id: "$status",
@@ -96,7 +116,7 @@ export const getPartnerAnalytics = async (req, res) => {
                 }
             ]),
             Event.aggregate([
-                { $match: { partnerName: name, status: "PROCESSED" } },
+                { $match: { partnerName: name, operatingMode, status: "PROCESSED" } },
                 { $group: { _id: null, totalProcessedAmount: { $sum: "$amount" } } }
             ]),
             Ledger.aggregate([
@@ -110,21 +130,23 @@ export const getPartnerAnalytics = async (req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
+                {
+                    $match: {
+                        "event.partnerName": name,
+                        "event.operatingMode": operatingMode,
+                        "event.status": "PROCESSED"
+                    }
+                },
                 { $group: { _id: null, totalSavings: { $sum: "$amount" } } }
             ]),
             Ledger.aggregate([
-                { $match: { account: "USER_SAVINGS", userId: { $type: "objectId" } } },
                 {
-                    $lookup: {
-                        from: "events",
-                        localField: "eventId",
-                        foreignField: "eventId",
-                        as: "event"
+                    $match: {
+                        account: "USER_WALLET_LIABILITY",
+                        userId: { $type: "objectId" },
+                        ...partnerReferenceMatch
                     }
                 },
-                { $unwind: "$event" },
-                { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
                 {
                     $group: {
                         _id: "$userId",
@@ -161,6 +183,10 @@ export const getPartnerAnalytics = async (req, res) => {
 export const getPartnerSavingsBehavior = async (req, res) => {
     try {
         const { name } = req.partner;
+        const operatingMode =
+            String(req.partner?.operatingMode || "demo").trim().toLowerCase() === "live"
+                ? "live"
+                : "demo";
         const savingsPercentage = Number(process.env.SAVINGS_PERCENTAGE ?? 0.1);
         const safeSavingsPercentage =
             Number.isFinite(savingsPercentage) && savingsPercentage > 0 && savingsPercentage <= 1
@@ -179,7 +205,13 @@ export const getPartnerSavingsBehavior = async (req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
+                {
+                    $match: {
+                        "event.partnerName": name,
+                        "event.operatingMode": operatingMode,
+                        "event.status": "PROCESSED"
+                    }
+                },
                 {
                     $group: {
                         _id: null,
@@ -208,7 +240,13 @@ export const getPartnerSavingsBehavior = async (req, res) => {
                     }
                 },
                 { $unwind: "$event" },
-                { $match: { "event.partnerName": name, "event.status": "PROCESSED" } },
+                {
+                    $match: {
+                        "event.partnerName": name,
+                        "event.operatingMode": operatingMode,
+                        "event.status": "PROCESSED"
+                    }
+                },
                 {
                     $group: {
                         _id: "$userId",
@@ -240,7 +278,14 @@ export const getPartnerSavingsBehavior = async (req, res) => {
                 }
             ]),
             Event.aggregate([
-                { $match: { partnerName: name, status: "PROCESSED", userId: { $type: "objectId" } } },
+                {
+                    $match: {
+                        partnerName: name,
+                        operatingMode,
+                        status: "PROCESSED",
+                        userId: { $type: "objectId" }
+                    }
+                },
                 {
                     $group: {
                         _id: "$userId",
