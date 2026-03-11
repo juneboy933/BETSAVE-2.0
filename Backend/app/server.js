@@ -1,28 +1,62 @@
 import express from 'express';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import userRoutes from './route/user.route.js';
 import partnerRoutes from './route/partner.route.js';
+import partnerAuthRoutes from './route/partnerAuth.route.js';
 import partnerDashboardRoutes from './route/partnerDashboard.route.js';
 import userDashboardRoutes from './route/userDashboard.route.js';
 import adminDashboardRoutes from './route/adminDashboard.route.js';
 import adminAuthRoutes from './route/adminAuth.route.js';
 import paymentRoutes from './route/payment.route.js';
-import dotenv from 'dotenv';
+// config file runs dotenv and validates required env vars
+import env from './config.js';
+import logger from './logger.js';
 import { connectDB, isDatabaseReady } from '../database/config.js';
 import { validatePaymentConfiguration } from '../service/validatePaymentConfig.service.js';
 import { validatePartnerModeConfiguration } from './middleware/partnerMode.middleware.js';
 
-dotenv.config();
-const PORT = process.env.PORT;
+const PORT = env.PORT;
 const app = express();
 
+// handle unexpected errors globally so the process can exit or restart gracefully
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[startup] Unhandled Rejection:', reason);
+    // optionally: send to monitoring service
+});
+process.on('uncaughtException', (err) => {
+    console.error('[startup] Uncaught Exception:', err);
+    // in production you'd typically exit here and let the container restart
+});
+
+// security middleware
+app.use(helmet());
 app.use(express.json());
+
+// CORS handling with whitelist
+const corsOrigins = env.CORS_ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean);
 app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Content-Type, x-api-key, x-signature, x-timestamp, x-user-phone, x-admin-token, x-callback-token, x-integration-token");
-    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-    if (req.method === "OPTIONS") return res.sendStatus(204);
+    const origin = req.headers.origin;
+    if (origin && corsOrigins.length && corsOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+    }
+    res.header(
+        'Access-Control-Allow-Headers',
+        'Content-Type, x-api-key, x-signature, x-timestamp, x-user-phone, x-admin-token, x-callback-token, x-integration-token'
+    );
+    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
 });
+
+// simple rate limiting for all requests; can be tightened per-route later
+const limiter = rateLimit({
+    windowMs: env.RATE_LIMIT_WINDOW_MS,
+    max: env.RATE_LIMIT_MAX,
+    standardHeaders: true,
+    legacyHeaders: false
+});
+app.use(limiter);
 
 // Health check
 app.get('/health', (_, res) => {
@@ -38,6 +72,7 @@ app.get('/health', (_, res) => {
 // Routes
 app.use('/api/v1/register', userRoutes);
 app.use('/api/v1/partners', partnerRoutes);
+app.use('/api/v1/partners/auth', partnerAuthRoutes);
 app.use('/api/v1/dashboard', partnerDashboardRoutes);
 app.use('/api/v1/dashboard/partner', partnerDashboardRoutes);
 app.use('/api/v1/dashboard/user', userDashboardRoutes);
@@ -76,10 +111,10 @@ try {
 connectDB()
     .then(() => {
         app.listen(PORT, () => {
-            console.log(`Server running on http://localhost:${PORT}`);
+            logger.info(`Server running on http://localhost:${PORT}`);
         });
     })
     .catch((error) => {
-        console.error(`[startup] Database connection failed: ${error.message}`);
+        logger.error('Database connection failed', { error: error.message });
         process.exit(1);
     });

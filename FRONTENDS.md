@@ -17,7 +17,7 @@ Default URL: `http://localhost:5181`
 Pages:
 - `/` home page (summary + register/login buttons)
 - `/register` partner registration
-- `/login` partner login
+- `/login` partner login (returns short‑lived JWT used by dashboard; API key/secret no longer needed in browser)
 - `/dashboard` authenticated dashboard with top totals + sidebar
 - `/dashboard/users` partner users table
 - `/dashboard/events` events table (status + savings amount)

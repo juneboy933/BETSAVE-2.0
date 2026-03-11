@@ -1,22 +1,38 @@
+import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import User from "../../database/models/user.model.js";
+import env from "../config.js";
 
-export const verifyUserPhone = async (req, res, next) => {
+/**
+ * Replaces the insecure phone-header based auth with JWTs.
+ * Clients must send `x-user-token: <jwt>` on protected routes.
+ * The token payload is expected to contain `userId` and `phoneNumber`.
+ */
+export const verifyUserToken = async (req, res, next) => {
     try {
-        const { userId } = req.params;
-        const userPhone = req.headers["x-user-phone"];
-
-        if (!mongoose.Types.ObjectId.isValid(userId)) {
-            return res.status(400).json({
+        const token = req.headers["x-user-token"];
+        if (!token || typeof token !== "string") {
+            return res.status(401).json({
                 status: "FAILED",
-                reason: "Invalid user id"
+                reason: "Missing authentication token"
             });
         }
 
-        if (!userPhone || typeof userPhone !== "string") {
+        let payload;
+        try {
+            payload = jwt.verify(token, env.USER_JWT_SECRET);
+        } catch (err) {
             return res.status(401).json({
                 status: "FAILED",
-                reason: "Missing user phone"
+                reason: "Invalid or expired token"
+            });
+        }
+
+        const { userId, phoneNumber } = payload;
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Token contains invalid user id"
             });
         }
 
@@ -28,7 +44,8 @@ export const verifyUserPhone = async (req, res, next) => {
             });
         }
 
-        if (user.phoneNumber !== userPhone.trim()) {
+        if (user.phoneNumber !== phoneNumber) {
+            // token was forged or user changed phone
             return res.status(403).json({
                 status: "FAILED",
                 reason: "User access denied"
@@ -41,9 +58,11 @@ export const verifyUserPhone = async (req, res, next) => {
         };
         next();
     } catch (error) {
+        console.error("verifyUserToken error:", error.message);
         return res.status(500).json({
             status: "FAILED",
             reason: "User verification failed"
         });
     }
 };
+

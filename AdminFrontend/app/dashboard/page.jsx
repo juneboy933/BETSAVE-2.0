@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import AnimatedNumber from "../../components/AnimatedNumber";
 import { getAdminToken, request } from "../../lib/api";
+import { Pie } from 'react-chartjs-2';
+import Chart from 'chart.js/auto';
 
 export default function AdminDashboardOverview() {
   const [metrics, setMetrics] = useState(null);
@@ -68,59 +70,42 @@ export default function AdminDashboardOverview() {
             </article>
           </div>
         )}
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Metric</th>
-                <th>Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {metrics &&
-                Object.entries(metrics).map(([k, v]) => (
-                  <tr key={k}>
-                    <td>{k}</td>
-                    <td>{String(v)}</td>
-                  </tr>
-                ))}
-              {!metrics && (
-                <tr>
-                  <td colSpan={2} className="text-center text-slate-500">
-                    No metrics loaded.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        {!metrics && !error && (
+          <div className="stats-grid">
+            <article className="metric-tile">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Loading...</p>
+              <div className="mt-1 h-8 w-16 animate-pulse rounded bg-slate-200"></div>
+            </article>
+            <article className="metric-tile">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Loading...</p>
+              <div className="mt-1 h-8 w-16 animate-pulse rounded bg-slate-200"></div>
+            </article>
+            <article className="metric-tile">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Loading...</p>
+              <div className="mt-1 h-8 w-16 animate-pulse rounded bg-slate-200"></div>
+            </article>
+            <article className="metric-tile">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Loading...</p>
+              <div className="mt-1 h-8 w-16 animate-pulse rounded bg-slate-200"></div>
+            </article>
+          </div>
+        )}
       </article>
       <article className="card">
         <h3 className="mb-2 text-base font-bold">Event Status Distribution</h3>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Status</th>
-                <th>Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {eventByStatus.map((row) => (
-                <tr key={row._id}>
-                  <td>{row._id}</td>
-                  <td>{row.count}</td>
-                </tr>
-              ))}
-              {eventByStatus.length === 0 && (
-                <tr>
-                  <td colSpan={2} className="text-center text-slate-500">
-                    No event status data loaded.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="w-full max-w-md">
+          <Pie
+            data={{
+              labels: eventByStatus.map((r) => r._id),
+              datasets: [
+                {
+                  data: eventByStatus.map((r) => r.count),
+                  backgroundColor: ['#34d399','#f87171','#a1a1aa']
+                }
+              ]
+            }}
+            options={{ plugins: { legend: { position: 'bottom' } } }}
+          />
         </div>
       </article>
     </section>

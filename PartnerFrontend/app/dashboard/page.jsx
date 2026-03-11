@@ -2,17 +2,16 @@
 
 import { useEffect, useState } from "react";
 import AnimatedNumber from "../../components/AnimatedNumber";
-import { getPartnerCreds, setPartnerCreds, signedRequest } from "../../lib/api";
+import { partnerRequest } from "../../lib/api";
+import { Pie } from 'react-chartjs-2';
+import Chart from 'chart.js/auto';
 
 export default function PartnerDashboardOverview() {
   const [rows, setRows] = useState([]);
   const [statusSummary, setStatusSummary] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalRows, setTotalRows] = useState(0);
-  const [credentials, setCredentials] = useState({ apiKey: "", apiSecret: "" });
-  const [credentialsMessage, setCredentialsMessage] = useState("");
   const [error, setError] = useState("");
-  const [credentialsError, setCredentialsError] = useState("");
   const statusClass = (status) =>
     status === "PROCESSED"
       ? "bg-emerald-50 text-emerald-800 font-semibold"
@@ -22,21 +21,13 @@ export default function PartnerDashboardOverview() {
   const amountClass = (value) =>
     Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
   const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
-  const secureStorageNotice =
-    "Store your API key and API secret in a backend secret manager and never expose them in browser code.";
-  const loginNotice =
-    "Keep these credentials safe. You will need the same API Key and API Secret to login again.";
 
   const load = async () => {
     try {
       setError("");
-      const creds = getPartnerCreds();
-      const data = await signedRequest({
+      const data = await partnerRequest({
         method: "GET",
-        path: `/api/v1/dashboard/partner/events?page=${currentPage}&limit=10`,
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
+        path: `/api/v1/dashboard/partner/events?page=${currentPage}&limit=10`
       });
       setRows(data.events || []);
       setTotalRows(Number(data.total) || 0);
@@ -51,37 +42,8 @@ export default function PartnerDashboardOverview() {
     }
   };
 
-  const loadCredentials = async () => {
-    try {
-      setCredentialsError("");
-      const creds = getPartnerCreds();
-      const data = await signedRequest({
-        method: "GET",
-        path: "/api/v1/partners/credentials",
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
-      });
-      const next = {
-        apiKey: data.credentials?.apiKey || "",
-        apiSecret: data.credentials?.apiSecret || ""
-      };
-      setCredentials(next);
-      setPartnerCreds(next);
-      setCredentialsMessage(data.securityNotice || secureStorageNotice);
-    } catch (err) {
-      setCredentialsError(err.message);
-    }
-  };
 
   useEffect(() => {
-    const storedCreds = getPartnerCreds();
-    setCredentials(storedCreds);
-    const pendingNotice = sessionStorage.getItem("partner_security_notice");
-    if (pendingNotice) {
-      setCredentialsMessage(pendingNotice);
-      sessionStorage.removeItem("partner_security_notice");
-    }
     load();
     const intervalId = setInterval(load, 10000);
     return () => {
@@ -129,6 +91,27 @@ export default function PartnerDashboardOverview() {
       </div>
 
       {error && <p className="mb-2 text-sm font-semibold text-red-700">{error}</p>}
+      {/* chart of status distribution */}
+      <div className="w-full max-w-md">
+        <Pie
+          data={{
+            labels: statusSummary.map((s) => s.status),
+            datasets: [
+              {
+                data: statusSummary.map((s) => s.count),
+                backgroundColor: [
+                  '#34d399',
+                  '#f87171',
+                  '#a1a1aa'
+                ]
+              }
+            ]
+          }}
+          options={{
+            plugins: { legend: { position: 'bottom' } }
+          }}
+        />
+      </div>
       <div className="table-wrap">
         <table className="table">
           <thead>
@@ -176,23 +159,6 @@ export default function PartnerDashboardOverview() {
         </button>
       </div>
 
-      <article className="rounded-xl border border-amber-300 bg-amber-50 p-4">
-        <div className="section-head">
-          <h3 className="text-base font-bold text-amber-900">Partner API Credentials</h3>
-          <button className="btn-secondary" onClick={loadCredentials}>
-            Load Credentials
-          </button>
-        </div>
-        <p className="mb-2 text-sm font-bold text-amber-900">{loginNotice}</p>
-        <p className="mb-3 text-sm font-semibold text-amber-900">
-          {credentialsMessage || secureStorageNotice}
-        </p>
-        <label className="label">API Key</label>
-        <input className="input" value={credentials.apiKey} readOnly />
-        <label className="label">API Secret</label>
-        <input className="input" value={credentials.apiSecret} readOnly />
-        {credentialsError && <p className="mt-2 text-sm font-semibold text-red-700">{credentialsError}</p>}
-      </article>
     </article>
   );
 }

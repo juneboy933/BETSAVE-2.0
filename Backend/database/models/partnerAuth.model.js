@@ -1,10 +1,12 @@
 import mongoose from "mongoose";
 
-const partnerSchema = new mongoose.Schema({
-    name: {
-        type: String,
+const partnerAuthSchema = new mongoose.Schema({
+    partnerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Partner",
         required: true,
         unique: true,
+        index: true
     },
     email: {
         type: String,
@@ -14,13 +16,11 @@ const partnerSchema = new mongoose.Schema({
         trim: true,
         index: true
     },
-    apiKey: {
+    passwordHash: {
         type: String,
-        required: true,
-        unique: true,
-        index: true,
+        required: true
     },
-    apiSecret: {
+    passwordSalt: {
         type: String,
         required: true
     },
@@ -29,18 +29,12 @@ const partnerSchema = new mongoose.Schema({
         enum: ['ACTIVE', 'SUSPENDED'],
         default: 'ACTIVE'
     },
-    operatingMode: {
-        type: String,
-        enum: ["demo", "live"],
-        default: "demo",
-        index: true
-    },
-    webhookUrl: {
-        type: String,
+    lastLoginAt: {
+        type: Date,
         default: null
     }
 }, { timestamps: true });
 
-const Partner = mongoose.model('Partner', partnerSchema);
+const PartnerAuth = mongoose.model('PartnerAuth', partnerAuthSchema);
 
-export default Partner;
+export default PartnerAuth;

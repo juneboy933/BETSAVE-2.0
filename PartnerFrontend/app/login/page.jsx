@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getApiBase, request, setApiBase, setPartnerCreds, setPartnerName, setPartnerOperatingMode } from "../../lib/api";
+import { getApiBase, setApiBase, loginPartnerAuth } from "../../lib/api";
 
 export default function PartnerLoginPage() {
   const router = useRouter();
   const [apiBase, setApiBaseInput] = useState("");
-  const [form, setForm] = useState({ apiKey: "", apiSecret: "" });
+  const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setApiBaseInput(getApiBase());
@@ -18,22 +19,36 @@ export default function PartnerLoginPage() {
   const onLogin = async () => {
     try {
       setError("");
-      const result = await request("/api/v1/partners/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
+      setLoading(true);
+
+      // Validate
+      if (!form.email.trim()) {
+        setError("Email is required");
+        return;
+      }
+      if (!form.password) {
+        setError("Password is required");
+        return;
+      }
+
+      await loginPartnerAuth({
+        email: form.email,
+        password: form.password
       });
-      setPartnerCreds(form);
-      setPartnerName(result.partner?.name || "");
-      setPartnerOperatingMode(result.partner?.operatingMode || "demo");
-      sessionStorage.setItem(
-        "partner_security_notice",
-        result.securityNotice ||
-          "Store your API key and API secret securely in your backend secret manager."
-      );
+
+      // Redirect to dashboard on success
       router.push("/dashboard");
     } catch (err) {
       setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Allow Enter key to submit
+  const onKeyPress = (e) => {
+    if (e.key === "Enter" && !loading) {
+      onLogin();
     }
   };
 
@@ -55,8 +70,8 @@ export default function PartnerLoginPage() {
           <p className="mt-2 text-sm text-slate-600">
             New here? <Link className="font-semibold text-brand" href="/register">Create your account</Link>.
           </p>
-          <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
-            Keep your API credentials secure. Store them only on your backend and secret manager.
+          <p className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
+            ✓ Login with your email and password. Your API credentials are used on your backend only.
           </p>
 
           <label className="label">Backend API URL</label>
@@ -67,19 +82,33 @@ export default function PartnerLoginPage() {
             </button>
           </div>
 
-          <label className="label">API Key</label>
-          <input className="input" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
+          <label className="label">Email</label>
+          <input 
+            className="input" 
+            type="email"
+            placeholder="your@company.com"
+            value={form.email} 
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            onKeyPress={onKeyPress}
+          />
 
-          <label className="label">API Secret</label>
+          <label className="label">Password</label>
           <input
             className="input"
-            value={form.apiSecret}
-            onChange={(e) => setForm({ ...form, apiSecret: e.target.value })}
+            type="password"
+            placeholder="Your password"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            onKeyPress={onKeyPress}
           />
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <button className="btn" onClick={onLogin}>
-              Login
+            <button 
+              className="btn" 
+              onClick={onLogin}
+              disabled={loading}
+            >
+              {loading ? "Logging in..." : "Login"}
             </button>
             <Link href="/register" className="btn-secondary">
               Go To Register

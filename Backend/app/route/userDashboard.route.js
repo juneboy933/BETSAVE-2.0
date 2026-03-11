@@ -4,12 +4,12 @@ import {
     getUserEvents,
     getUserTransactions
 } from "../controller/userDashboard.controller.js";
-import { verifyUserPhone } from "../middleware/userAuth.middleware.js";
+import { verifyUserToken } from "../middleware/userAuth.middleware.js";
 
 const router = express.Router();
 
-router.get("/:userId", verifyUserPhone, getUserDashboardSummary);
-router.get("/:userId/events", verifyUserPhone, getUserEvents);
-router.get("/:userId/transactions", verifyUserPhone, getUserTransactions);
+router.get("/:userId", verifyUserToken, getUserDashboardSummary);
+router.get("/:userId/events", verifyUserToken, getUserEvents);
+router.get("/:userId/transactions", verifyUserToken, getUserTransactions);
 
 export default router;

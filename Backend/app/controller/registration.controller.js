@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
+import env from "../config.js";
 import User from "../../database/models/user.model.js";
 import Wallet from "../../database/models/wallet.model.js";
 
@@ -35,9 +37,20 @@ export const registerUser = async (req, res) => {
 
     await session.commitTransaction();
 
+    // generate a JWT so the client can authenticate subsequent requests
+    const token = jwt.sign(
+      {
+        userId: user[0]._id.toString(),
+        phoneNumber: normalizePhone
+      },
+      env.USER_JWT_SECRET,
+      { expiresIn: env.USER_JWT_EXPIRATION }
+    );
+
     return res.status(201).json({
       success: true,
       userId: user[0]._id,
+      token
     });
 
   } catch (error) {

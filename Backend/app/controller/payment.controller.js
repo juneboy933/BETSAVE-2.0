@@ -103,14 +103,23 @@ const parseWithdrawalCallbackPayload = (payload) => {
     };
 };
 
+import crypto from "crypto";
+
 const assertCallbackAuth = (req, res) => {
     const expectedToken = String(process.env.PAYMENT_CALLBACK_TOKEN || "").trim();
     if (!expectedToken) {
+        // no token configured, allow callback (not recommended for prod)
         return true;
     }
 
     const providedToken = String(req.headers["x-callback-token"] || "").trim();
-    if (providedToken !== expectedToken) {
+    const expectedBuffer = Buffer.from(expectedToken, "utf8");
+    const providedBuffer = Buffer.from(providedToken, "utf8");
+    const valid =
+        expectedBuffer.length === providedBuffer.length &&
+        crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+
+    if (!valid) {
         res.status(401).json({
             status: "FAILED",
             reason: "Unauthorized callback"

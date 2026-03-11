@@ -47,11 +47,13 @@ Base URL: `http://localhost:5000`
 ### Public / Auth
 
 - `GET /health`
-- `POST /api/v1/register` register user (phone)
+- `POST /api/v1/register` register user (phone) → returns JWT token for subsequent calls
 - `POST /api/v1/partners/create` register partner
 - `POST /api/v1/partners/login` partner login
 - `POST /api/v1/admin/auth/register` admin register
 - `POST /api/v1/admin/auth/login` admin login
+
+> **Note:** user and admin clients should store tokens in **httpOnly, secure cookies** or in memory. Persisting secrets in `localStorage` is unsafe and has been removed from the default frontends.
 
 ### Partner (signed)
 
@@ -110,13 +112,20 @@ MONGO_URI=mongodb://localhost:27017/betsave
 REDIS_URI=redis://localhost:6379
 SAVINGS_PERCENTAGE=0.1
 
-# Admin middleware
+# security
 ADMIN_DASHBOARD_TOKEN=your_secure_admin_token
+USER_JWT_SECRET=a long random string (min 32 chars)
+USER_JWT_EXPIRATION=7d
+PARTNER_JWT_SECRET=a long random string (min 32 chars)
+PAYMENT_CALLBACK_TOKEN=another_secret_if_you_use_callbacks
 
 # Optional operations readiness flags
 BANK_API_URL=
 BANK_API_KEY=
 BANK_SETTLEMENT_ACCOUNT=
+
+# CORS whitelist (comma separated origins)
+CORS_ALLOWED_ORIGINS=
 ```
 
 Optional frontend API base:

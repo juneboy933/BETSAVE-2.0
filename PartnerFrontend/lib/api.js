@@ -18,10 +18,31 @@ export const setApiBase = (value) => {
   localStorage.setItem("partner_api_base", normalizeApiBase(value));
 };
 
-export const getPartnerCreds = () => ({
-  apiKey: canUseStorage() ? localStorage.getItem("partner_api_key") || "" : "",
-  apiSecret: canUseStorage() ? localStorage.getItem("partner_api_secret") || "" : ""
-});
+// credentials/token are kept in memory only; do not persist to avoid theft via XSS
+let partnerApiKey = "";
+let partnerApiSecret = "";
+let partnerToken = "";
+
+export const getPartnerCreds = () => ({ apiKey: partnerApiKey, apiSecret: partnerApiSecret });
+export const setPartnerCreds = ({ apiKey, apiSecret }) => {
+  partnerApiKey = String(apiKey || "").trim();
+  partnerApiSecret = String(apiSecret || "").trim();
+};
+
+export const setPartnerToken = (token) => {
+  partnerToken = String(token || "").trim();
+};
+export const getPartnerToken = () => partnerToken;
+
+// wrapper for dashboard requests using bearer token
+export async function partnerRequest(path, options = {}) {
+  const headers = Object.assign({}, options.headers || {});
+  if (partnerToken) {
+    headers.Authorization = `Bearer ${partnerToken}`;
+  }
+  const response = await fetch(buildRequestUrl(path), { ...options, headers });
+  return parseResponse(response);
+}
 
 export const getPartnerName = () => (canUseStorage() ? localStorage.getItem("partner_name") || "" : "");
 export const getPartnerOperatingMode = () => (canUseStorage() ? localStorage.getItem("partner_operating_mode") || "demo" : "demo");
@@ -29,12 +50,6 @@ export const getPartnerOperatingMode = () => (canUseStorage() ? localStorage.get
 export const hasPartnerCreds = () => {
   const { apiKey, apiSecret } = getPartnerCreds();
   return Boolean(apiKey && apiSecret);
-};
-
-export const setPartnerCreds = ({ apiKey, apiSecret }) => {
-  if (!canUseStorage()) return;
-  localStorage.setItem("partner_api_key", apiKey.trim());
-  localStorage.setItem("partner_api_secret", apiSecret.trim());
 };
 
 export const setPartnerName = (name) => {
@@ -54,9 +69,9 @@ export const setPartnerOperatingMode = (mode) => {
 };
 
 export const clearPartnerCreds = () => {
+  partnerApiKey = "";
+  partnerApiSecret = "";
   if (!canUseStorage()) return;
-  localStorage.removeItem("partner_api_key");
-  localStorage.removeItem("partner_api_secret");
   localStorage.removeItem("partner_name");
   localStorage.removeItem("partner_operating_mode");
 };
@@ -116,4 +131,61 @@ export async function signedRequest({ method, path, body = {}, apiKey, apiSecret
   });
 
   return parseResponse(response);
+}
+
+// Partner authentication endpoints
+export async function registerPartnerAuth({ name, email, password, webhookUrl }) {
+  const result = await request("/api/v1/partners/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+      webhookUrl: webhookUrl?.trim() || ""
+    })
+  });
+
+  // Store token for future requests
+  if (result.token) {
+    setPartnerToken(result.token);
+  }
+
+  // Store partner info
+  if (result.partner?.name) {
+    setPartnerName(result.partner.name);
+  }
+
+  // Return credentials object for display
+  return {
+    ...result,
+    credentials: result.apiCredentials ? {
+      apiKey: result.apiCredentials.apiKey,
+      apiSecret: result.apiCredentials.apiSecret,
+      operatingMode: result.partner?.operatingMode || "demo"
+    } : null
+  };
+}
+
+export async function loginPartnerAuth({ email, password }) {
+  const result = await request("/api/v1/partners/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+      password
+    })
+  });
+
+  // Store token for future requests
+  if (result.token) {
+    setPartnerToken(result.token);
+  }
+
+  // Store partner info if returned
+  if (result.partner?.name) {
+    setPartnerName(result.partner.name);
+  }
+
+  return result;
 }

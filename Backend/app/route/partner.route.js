@@ -1,4 +1,6 @@
 import express from 'express';
+import Joi from 'joi';
+import { validateBody } from '../middleware/validation.middleware.js';
 import {
     createPartner,
     getPartnerCredentials,
@@ -19,8 +21,31 @@ router.post('/login', loginPartner);
 router.get('/credentials', verifyPartner, getPartnerCredentials);
 router.get('/mode', verifyPartner, getPartnerOperatingMode);
 router.patch('/mode', verifyPartner, setPartnerOperatingMode);
-router.post('/events', verifyPartner, requirePartnerIntegrationInLiveMode, postEvent);
-router.post('/users/register', verifyPartner, requirePartnerIntegrationInLiveMode, registerUserFromPartner);
-router.post('/users/verify-otp', verifyPartner, requirePartnerIntegrationInLiveMode, verifyPartnerUserOtp);
+const eventSchema = Joi.object({
+    eventId: Joi.string().required(),
+    phone: Joi.string().pattern(/^\+254\d{9}$/).required(),
+    amount: Joi.number().positive().required(),
+    type: Joi.string().optional()
+});
+
+const newPartnerUserSchema = Joi.object({
+    phone: Joi.string().pattern(/^\+254\d{9}$/).required()
+});
+
+router.post(
+    '/events',
+    verifyPartner,
+    requirePartnerIntegrationInLiveMode,
+    validateBody(eventSchema),
+    postEvent
+);
+router.post(
+    '/users/register',
+    verifyPartner,
+    requirePartnerIntegrationInLiveMode,
+    validateBody(newPartnerUserSchema),
+    registerUserFromPartner
+);
+router.post('/users/verify-otp', verifyPartner, requirePartnerIntegrationInLiveMode, validateBody(newPartnerUserSchema), verifyPartnerUserOtp);
 
 export default router;

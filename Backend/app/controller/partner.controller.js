@@ -22,9 +22,22 @@ export const createPartner = async (req, res) => {
 
         const partner = await registerPartner({name, webhookUrl, operatingMode});
 
+        // also issue dashboard token so the creator can immediately log in
+        const jwt = await import('jsonwebtoken');
+        const token = jwt.sign(
+            {
+                partnerId: partner._id.toString(),
+                name: partner.name,
+                operatingMode: partner.operatingMode || 'demo'
+            },
+            process.env.PARTNER_JWT_SECRET,
+            { expiresIn: '8h' }
+        );
+
         return res.status(201).json({
             status: 'SUCCESS',
             partner,
+            token,
             securityNotice: CREDENTIALS_SECURITY_NOTICE
         });
 
@@ -75,16 +88,28 @@ export const loginPartner = async (req, res) => {
             });
         }
 
+        // generate session token for dashboard usage
+        const jwt = await import('jsonwebtoken');
+        const token = jwt.sign(
+            {
+                partnerId: partner._id.toString(),
+                name: partner.name,
+                operatingMode: partner.operatingMode || "demo"
+            },
+            process.env.PARTNER_JWT_SECRET,
+            { expiresIn: '8h' }
+        );
+
         return res.json({
             status: "SUCCESS",
             partner: {
                 id: partner._id,
                 name: partner.name,
-                apiKey: partner.apiKey,
                 webhookUrl: partner.webhookUrl,
                 status: partner.status,
                 operatingMode: partner.operatingMode || "demo"
             },
+            token,
             securityNotice: CREDENTIALS_SECURITY_NOTICE
         });
     } catch (error) {

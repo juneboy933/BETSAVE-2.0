@@ -2,6 +2,7 @@
 
 const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 const DEFAULT_ADMIN_MODE = "live";
+let adminDashboardToken = ""; // stored in memory only
 const canUseStorage = () => typeof window !== "undefined" && typeof localStorage !== "undefined";
 
 export const getApiBase = () => (canUseStorage() ? localStorage.getItem("admin_api_base") : null) || DEFAULT_API;
@@ -9,10 +10,9 @@ export const setApiBase = (value) => {
   if (!canUseStorage()) return;
   localStorage.setItem("admin_api_base", value.trim());
 };
-export const getAdminToken = () => (canUseStorage() ? localStorage.getItem("admin_dashboard_token") : null) || "";
+export const getAdminToken = () => adminDashboardToken;
 export const setAdminToken = (token) => {
-  if (!canUseStorage()) return;
-  localStorage.setItem("admin_dashboard_token", token.trim());
+  adminDashboardToken = String(token || "").trim();
 };
 export const hasAdminToken = () => Boolean(getAdminToken());
 export const getAdminOperatingMode = () => {
@@ -25,8 +25,8 @@ export const setAdminOperatingMode = (mode) => {
   localStorage.setItem("admin_operating_mode", normalized);
 };
 export const clearAdminToken = () => {
+  adminDashboardToken = "";
   if (!canUseStorage()) return;
-  localStorage.removeItem("admin_dashboard_token");
   localStorage.removeItem("admin_operating_mode");
 };
 

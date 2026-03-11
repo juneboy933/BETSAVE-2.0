@@ -19,6 +19,11 @@
     "bullmq": "^5.69.2",
     "dotenv": "^17.2.4",
     "express": "^5.2.1",
+    "helmet": "^7.0.0",
+    "express-rate-limit": "^7.0.0",
+    "joi": "^17.10.0",
+    "jsonwebtoken": "^9.0.0",
+    "winston": "^3.11.0",
     "ioredis": "^5.9.3",
     "mongoose": "^9.2.1"
   }

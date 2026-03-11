@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getPartnerCreds, request, setPartnerCreds } from "../../lib/api";
+import { getPartnerCreds, request, setPartnerCreds, setPartnerToken } from "../../lib/api";
 
 export default function IntegrationPage() {
   const [form, setForm] = useState({ name: "", webhookUrl: "" });
   const [loginForm, setLoginForm] = useState({ apiKey: "", apiSecret: "" });
   const [creds, setCreds] = useState({ apiKey: "", apiSecret: "" });
+  const [token, setToken] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
@@ -23,7 +24,11 @@ export default function IntegrationPage() {
       const next = { apiKey: result.partner.apiKey, apiSecret: result.partner.apiSecret };
       setCreds(next);
       setPartnerCreds(next);
-      setMsg("Partner created and credentials saved.");
+      if (result.token) {
+        setToken(result.token);
+        setPartnerToken(result.token);
+      }
+      setMsg("Partner created. Session token issued.");
     } catch (error) {
       setErr(error.message);
     }
@@ -40,7 +45,11 @@ export default function IntegrationPage() {
       const next = { apiKey: loginForm.apiKey, apiSecret: loginForm.apiSecret };
       setCreds(next);
       setPartnerCreds(next);
-      setMsg(`Logged in as ${result.partner.name}. Credentials saved.`);
+      if (result.token) {
+        setToken(result.token);
+        setPartnerToken(result.token);
+      }
+      setMsg(`Logged in as ${result.partner.name}. Session token issued.`);
     } catch (error) {
       setErr(error.message);
     }
@@ -97,11 +106,12 @@ export default function IntegrationPage() {
         </article>
 
         <article className="card">
-          <h3 className="mb-3 text-base font-bold">Credentials</h3>
-          <label className="label">API Key</label>
-          <input className="input" value={creds.apiKey} readOnly />
-          <label className="label">API Secret</label>
-          <input className="input" value={creds.apiSecret} readOnly />
+          <h3 className="mb-3 text-base font-bold">Session Token</h3>
+          <p className="text-sm text-slate-700 break-words">{token || "(not logged in)"}</p>
+          <p className="text-xs text-slate-500 mt-1">
+            Copy this token to your backend and use it to call the dashboard APIs. Do
+            <strong>not</strong> expose API secret in the browser.
+          </p>
         </article>
       </div>
     </section>
