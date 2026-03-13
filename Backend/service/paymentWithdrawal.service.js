@@ -146,6 +146,12 @@ export const markWithdrawalDisbursed = async ({ withdrawalRequestId, providerReq
     if (withdrawalRequest.status === "DISBURSED") {
         return { paymentTransaction, withdrawalRequest };
     }
+    if (withdrawalRequest.status !== "RESERVED") {
+        throw new Error("Withdrawal request is not in a disbursable state");
+    }
+    if (paymentTransaction.status === "FAILED") {
+        throw new Error("Cannot disburse a failed withdrawal");
+    }
 
     const disburseEventId = buildDisburseEventId(withdrawalRequest._id);
     await postLedger({
@@ -194,6 +200,9 @@ export const markWithdrawalFailed = async ({ withdrawalRequestId, failureReason,
     const paymentTransaction = await PaymentTransaction.findById(withdrawalRequest.paymentTransactionId);
     if (!paymentTransaction) {
         throw new Error("Payment transaction not found");
+    }
+    if (withdrawalRequest.status === "DISBURSED" || paymentTransaction.status === "SUCCESS") {
+        return { paymentTransaction, withdrawalRequest };
     }
 
     const isReserved = withdrawalRequest.status === "RESERVED";

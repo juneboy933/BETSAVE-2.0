@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getPartnerCreds, signedRequest } from "../../lib/api";
+import { partnerRequest } from "../../lib/api";
 
 export default function AnalyticsPage() {
   const [stats, setStats] = useState([]);
@@ -14,23 +14,10 @@ export default function AnalyticsPage() {
 
   const loadAnalytics = async () => {
     try {
-      const creds = getPartnerCreds();
       setErr("");
       const [a, b] = await Promise.all([
-        signedRequest({
-          method: "GET",
-          path: "/api/v1/dashboard/partner/analytics",
-          body: {},
-          apiKey: creds.apiKey,
-          apiSecret: creds.apiSecret
-        }),
-        signedRequest({
-          method: "GET",
-          path: "/api/v1/dashboard/partner/savings-behavior",
-          body: {},
-          apiKey: creds.apiKey,
-          apiSecret: creds.apiSecret
-        })
+        partnerRequest("/api/v1/dashboard/partner/analytics"),
+        partnerRequest("/api/v1/dashboard/partner/savings-behavior")
       ]);
       setStats(a.stat || []);
       setTotalSavings(a.totalSavings || 0);

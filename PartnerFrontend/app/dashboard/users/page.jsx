@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { getPartnerCreds, getPartnerOperatingMode, signedRequest } from "../../../lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getPartnerOperatingMode, partnerRequest } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function PartnerDashboardUsers() {
   const [phone, setPhone] = useState("");
@@ -41,35 +42,25 @@ export default function PartnerDashboardUsers() {
   const activeUsers = filteredUsers.filter((user) => user.status === "ACTIVE" || user.status === "VERIFIED").length;
   const autoSavingsUsers = filteredUsers.filter((user) => user.autoSavingsEnabled).length;
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
       setError("");
       setOperatingMode(getPartnerOperatingMode());
-      const creds = getPartnerCreds();
-      const data = await signedRequest({
-        method: "GET",
-        path: "/api/v1/dashboard/partner/users?page=1&limit=100",
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
-      });
+      const data = await partnerRequest("/api/v1/dashboard/partner/users?page=1&limit=100");
       setUsers(data.users || []);
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, []);
 
   const registerUser = async (autoSavingsEnabled) => {
     try {
       setError("");
       setMessage("");
-      const creds = getPartnerCreds();
-      const result = await signedRequest({
+      const result = await partnerRequest("/api/v1/partners/users/register", {
         method: "POST",
-        path: "/api/v1/partners/users/register",
-        body: { phone, autoSavingsEnabled },
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, autoSavingsEnabled })
       });
 
       if (result.requiresOtp) {
@@ -94,13 +85,10 @@ export default function PartnerDashboardUsers() {
     try {
       setError("");
       setMessage("");
-      const creds = getPartnerCreds();
-      const result = await signedRequest({
+      const result = await partnerRequest("/api/v1/partners/users/verify-otp", {
         method: "POST",
-        path: "/api/v1/partners/users/verify-otp",
-        body: { phone: otpPhone, otp: otpCode },
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: otpPhone, otp: otpCode })
       });
       setMessage(
         `OTP verified. ${result.partnerUser?.phoneNumber || otpPhone} is now ${result.partnerUser?.status || "VERIFIED"}.`
@@ -114,10 +102,17 @@ export default function PartnerDashboardUsers() {
   };
 
   useEffect(() => {
-    loadUsers();
-    const intervalId = setInterval(loadUsers, 10000);
-    return () => clearInterval(intervalId);
-  }, []);
+    return attachVisiblePolling(loadUsers);
+  }, [loadUsers]);
+
+  useEffect(() => {
+    const onPartnerModeChanged = () => {
+      setOperatingMode(getPartnerOperatingMode());
+      loadUsers();
+    };
+    window.addEventListener("partner-mode-changed", onPartnerModeChanged);
+    return () => window.removeEventListener("partner-mode-changed", onPartnerModeChanged);
+  }, [loadUsers]);
 
   return (
     <article className="card space-y-3">

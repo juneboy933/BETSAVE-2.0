@@ -66,3 +66,21 @@ export const verifyUserToken = async (req, res, next) => {
     }
 };
 
+export const requireAuthenticatedUserOwnership = (paramName = "userId") => (req, res, next) => {
+    const resourceUserId = String(req.params?.[paramName] || "").trim();
+    if (!resourceUserId) {
+        return res.status(400).json({
+            status: "FAILED",
+            reason: "Missing user id"
+        });
+    }
+
+    if (resourceUserId !== String(req.user?.id || "").trim()) {
+        return res.status(403).json({
+            status: "FAILED",
+            reason: "User access denied"
+        });
+    }
+
+    return next();
+};

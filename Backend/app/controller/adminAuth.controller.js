@@ -7,9 +7,28 @@ import {
     hashPassword,
     hashToken
 } from "../../service/adminAuth.service.js";
+import { canAdminManageInvitations } from "../../service/adminPermissions.service.js";
+import env from "../config.js";
+import { buildClearedSessionCookie, buildSessionCookie } from "../http/cookie.js";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INVITATION_VALID_HOURS = 48; // Invitations valid for 48 hours
+const ADMIN_COOKIE_NAME = "betsave_admin_session";
+const ADMIN_SESSION_MAX_AGE_SECONDS = Number(env.ADMIN_TOKEN_TTL_HOURS || 12) * 60 * 60;
+
+const attachAdminSessionCookie = (res, token) => {
+    res.setHeader("Set-Cookie", buildSessionCookie({
+        name: ADMIN_COOKIE_NAME,
+        value: token,
+        maxAgeSeconds: ADMIN_SESSION_MAX_AGE_SECONDS
+    }));
+};
+
+const denyInvitationManagement = (res) =>
+    res.status(403).json({
+        status: "FAILED",
+        reason: "Only the primary admin can manage admin invitations"
+    });
 
 /**
  * CREATE ADMIN INVITATION (Admin-only)
@@ -23,6 +42,9 @@ export const createAdminInvitation = async (req, res) => {
                 status: "FAILED",
                 reason: "Authentication required"
             });
+        }
+        if (!req.admin.canManageAdminInvitations) {
+            return denyInvitationManagement(res);
         }
 
         const { invitedEmail, invitedName, notes } = req.body;
@@ -68,18 +90,11 @@ export const createAdminInvitation = async (req, res) => {
         const invitationCode = generateInvitationCode();
         const expiresAt = new Date(Date.now() + INVITATION_VALID_HOURS * 60 * 60 * 1000);
 
-        // Get inviting admin's info
-        let invitingAdminId = req.admin.id || req.admin._id;
-        if (req.admin.source === "ENV_TOKEN") {
-            // ENV_TOKEN doesn't have database record; use null or special marker
-            invitingAdminId = null;
-        }
-
         const invitation = await AdminInvitation.create({
             invitationCode,
             invitedEmail: normalizedEmail,
             invitedName: invitedName.trim(),
-            invitedBy: invitingAdminId,
+            invitedBy: req.admin.id,
             expiresAt,
             notes: notes?.trim() || ""
         });
@@ -92,7 +107,8 @@ export const createAdminInvitation = async (req, res) => {
                 invitedEmail: invitation.invitedEmail,
                 invitedName: invitation.invitedName,
                 expiresAt: invitation.expiresAt,
-                notes: "⚠️ Share this code with the invited admin. It expires in 48 hours and can only be used once."
+                registerPath: "/register",
+                notes: "Share this code with the invited admin. It expires in 48 hours and can only be used once."
             }
         });
     } catch (error) {
@@ -172,13 +188,17 @@ export const registerAdminWithInvitation = async (req, res) => {
         invitation.usedByAdmin = admin._id;
         await invitation.save();
 
+        attachAdminSessionCookie(res, adminToken);
+        const canManageAdminInvitations = await canAdminManageInvitations(admin._id);
+
         return res.status(201).json({
             status: "SUCCESS",
             message: "Admin account created successfully",
             admin: {
                 id: admin._id,
                 name: admin.name,
-                email: admin.email
+                email: admin.email,
+                canManageAdminInvitations
             },
             token: adminToken
         });
@@ -236,17 +256,70 @@ export const loginAdmin = async (req, res) => {
         admin.lastLoginAt = new Date();
         await admin.save();
 
+        attachAdminSessionCookie(res, adminToken);
+        const canManageAdminInvitations = await canAdminManageInvitations(admin._id);
+
         return res.json({
             status: "SUCCESS",
             admin: {
                 id: admin._id,
                 name: admin.name,
-                email: admin.email
+                email: admin.email,
+                canManageAdminInvitations
             },
             token: adminToken
         });
     } catch (error) {
         console.error("[loginAdmin]", error);
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const logoutAdmin = async (req, res) => {
+    try {
+        if (req.admin?.id) {
+            await Admin.findByIdAndUpdate(req.admin.id, {
+                $set: {
+                    apiTokenHash: null,
+                    apiTokenIssuedAt: null
+                }
+            });
+        }
+
+        res.setHeader("Set-Cookie", buildClearedSessionCookie(ADMIN_COOKIE_NAME));
+        return res.json({
+            status: "SUCCESS"
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const getAdminSession = async (req, res) => {
+    try {
+        if (!req.admin) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Authentication required"
+            });
+        }
+
+        return res.json({
+            status: "SUCCESS",
+            admin: {
+                id: req.admin.id,
+                name: req.admin.name,
+                email: req.admin.email,
+                canManageAdminInvitations: Boolean(req.admin.canManageAdminInvitations)
+            }
+        });
+    } catch (error) {
         return res.status(500).json({
             status: "FAILED",
             reason: error.message
@@ -266,6 +339,9 @@ export const listAdminInvitations = async (req, res) => {
                 reason: "Authentication required"
             });
         }
+        if (!req.admin.canManageAdminInvitations) {
+            return denyInvitationManagement(res);
+        }
 
         const { status = "PENDING" } = req.query;
         const query = {};
@@ -281,6 +357,7 @@ export const listAdminInvitations = async (req, res) => {
 
         return res.json({
             status: "SUCCESS",
+            canManageAdminInvitations: true,
             invitations: invitations.map(inv => ({
                 id: inv._id,
                 invitedEmail: inv.invitedEmail,
@@ -312,6 +389,9 @@ export const revokeAdminInvitation = async (req, res) => {
                 status: "FAILED",
                 reason: "Authentication required"
             });
+        }
+        if (!req.admin.canManageAdminInvitations) {
+            return denyInvitationManagement(res);
         }
 
         const { invitationId } = req.params;

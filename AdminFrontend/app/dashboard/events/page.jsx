@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getAdminToken, request } from "../../../lib/api";
+import { request } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function AdminDashboardEvents() {
   const [events, setEvents] = useState([]);
@@ -27,9 +28,7 @@ export default function AdminDashboardEvents() {
       if (filters.partner.trim()) params.set("partnerName", filters.partner.trim());
       if (filters.phone.trim()) params.set("phone", filters.phone.trim());
 
-      const data = await request(`/api/v1/dashboard/admin/events?${params.toString()}`, {
-        headers: { "x-admin-token": getAdminToken() }
-      });
+      const data = await request(`/api/v1/dashboard/admin/events?${params.toString()}`);
       setEvents(data.events || []);
     } catch (err) {
       setError(err.message);
@@ -37,9 +36,7 @@ export default function AdminDashboardEvents() {
   }, [filters.phone, filters.partner, filters.status]);
 
   useEffect(() => {
-    refresh();
-    const intervalId = setInterval(refresh, 10000);
-    return () => clearInterval(intervalId);
+    return attachVisiblePolling(refresh);
   }, [refresh]);
 
   useEffect(() => {

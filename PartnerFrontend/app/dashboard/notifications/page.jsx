@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getPartnerCreds, signedRequest } from "../../../lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { partnerRequest } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function PartnerDashboardNotifications() {
   const [notifications, setNotifications] = useState([]);
@@ -10,37 +11,24 @@ export default function PartnerDashboardNotifications() {
   const [total, setTotal] = useState(0);
   const pageSize = 10;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setError("");
-      const creds = getPartnerCreds();
-      await signedRequest({
-        method: "PATCH",
-        path: "/api/v1/dashboard/partner/notifications/read-all",
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
+      await partnerRequest("/api/v1/dashboard/partner/notifications/read-all", {
+        method: "PATCH"
       });
 
-      const data = await signedRequest({
-        method: "GET",
-        path: `/api/v1/dashboard/partner/notifications?page=${currentPage}&limit=${pageSize}`,
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
-      });
+      const data = await partnerRequest(`/api/v1/dashboard/partner/notifications?page=${currentPage}&limit=${pageSize}`);
       setNotifications(data.notifications || []);
       setTotal(Number(data.total) || 0);
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, [currentPage, pageSize]);
 
   useEffect(() => {
-    load();
-    const intervalId = setInterval(load, 10000);
-    return () => clearInterval(intervalId);
-  }, [currentPage]);
+    return attachVisiblePolling(load);
+  }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 

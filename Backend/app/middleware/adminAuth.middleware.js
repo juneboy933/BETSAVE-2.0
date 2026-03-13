@@ -1,34 +1,24 @@
-import crypto from "crypto";
 import Admin from "../../database/models/admin.model.js";
+import env from "../config.js";
+import { parseCookies } from "../http/cookie.js";
 import { hashToken } from "../../service/adminAuth.service.js";
+import { canAdminManageInvitations } from "../../service/adminPermissions.service.js";
 
 export const verifyAdmin = async (req, res, next) => {
-    const configuredToken = process.env.ADMIN_DASHBOARD_TOKEN;
-    const incomingToken = req.headers["x-admin-token"];
+    const cookies = parseCookies(req.headers.cookie);
+    const incomingToken = String(req.headers["x-admin-token"] || cookies.betsave_admin_session || "").trim();
 
-    if (!incomingToken || typeof incomingToken !== "string") {
+    if (!incomingToken) {
         return res.status(401).json({
             status: "FAILED",
             reason: "Missing admin token"
         });
     }
 
-    if (configuredToken) {
-        const expected = Buffer.from(configuredToken, "utf8");
-        const provided = Buffer.from(incomingToken, "utf8");
-
-        if (
-            expected.length === provided.length &&
-            crypto.timingSafeEqual(expected, provided)
-        ) {
-            req.admin = { source: "ENV_TOKEN" };
-            return next();
-        }
-    }
-
     try {
         const apiTokenHash = hashToken(incomingToken);
-        const admin = await Admin.findOne({ apiTokenHash, status: "ACTIVE" }).select("name email");
+        const admin = await Admin.findOne({ apiTokenHash, status: "ACTIVE" })
+            .select("_id name email apiTokenIssuedAt");
         if (!admin) {
             return res.status(401).json({
                 status: "FAILED",
@@ -36,10 +26,20 @@ export const verifyAdmin = async (req, res, next) => {
             });
         }
 
+        const issuedAt = admin.apiTokenIssuedAt ? new Date(admin.apiTokenIssuedAt).getTime() : 0;
+        const ttlMs = Number(env.ADMIN_TOKEN_TTL_HOURS || 12) * 60 * 60 * 1000;
+        if (!issuedAt || Date.now() - issuedAt > ttlMs) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Admin token expired"
+            });
+        }
+
         req.admin = {
-            source: "DB_TOKEN",
+            id: String(admin._id),
             name: admin.name,
-            email: admin.email
+            email: admin.email,
+            canManageAdminInvitations: await canAdminManageInvitations(admin._id)
         };
 
         return next();

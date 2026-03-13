@@ -6,39 +6,21 @@ When a partner sends a bet event, Betsave ingests it, processes it asynchronousl
 
 ## Project Structure
 
-- `Backend/` Express API + MongoDB models + BullMQ workers
-- `PartnerFrontend/` Next.js + Tailwind partner portal (port `5181`)
-- `AdminFrontend/` Next.js + Tailwind admin portal (port `5182`)
-- `FRONTENDS.md` quick frontend run guide
+- `Backend/` Express API, MongoDB models, BullMQ workers, payment and recovery services
+- `PartnerFrontend/` Next.js partner portal (port `5181`)
+- `AdminFrontend/` Next.js admin portal (port `5182`)
+- `docker-compose.prod.yml` production-oriented Docker Compose stack with Mongo replica set bootstrap
+- `.env.production.example` deployment environment template
 
 ## Core Flow
 
-1. Partner registers and receives `apiKey` + `apiSecret`.
-2. Partner sends signed event (`BET_PLACED`) to Betsave.
-3. Betsave ingests event (`RECEIVED`) and queues processing.
-4. Event worker processes the event:
-   - validates amount
-   - computes savings (`SAVINGS_PERCENTAGE`)
-   - posts double-entry ledger records
-   - credits wallet
-   - marks event status (`PROCESSED` or `FAILED`)
-5. Webhook worker notifies partner system of final outcome.
-6. Partner/Admin dashboards show live operational and financial data.
-
-## Tech Stack
-
-### Backend
-
-- Node.js (ESM)
-- Express
-- MongoDB + Mongoose
-- Redis + BullMQ
-
-### Frontends
-
-- Next.js 15
-- React 18
-- Tailwind CSS
+1. A partner operator registers with email and password and receives a one-time `apiKey` and `apiSecret`.
+2. The partner backend signs and sends a bet event.
+3. Betsave ingests the event and queues it for processing.
+4. The event worker validates the event, calculates savings, initiates payment collection, and links the payment transaction to the event.
+5. Deposit callbacks finalize the event, post balanced ledger entries, and update the wallet.
+6. The webhook worker notifies the partner of terminal event outcomes.
+7. The recovery worker reconciles stale in-flight operations and surfaces stale pending work.
 
 ## Backend API Overview
 
@@ -47,35 +29,44 @@ Base URL: `http://localhost:5000`
 ### Public / Auth
 
 - `GET /health`
-- `POST /api/v1/register` register user (phone) → returns JWT token for subsequent calls
-- `POST /api/v1/partners/create` register partner
-- `POST /api/v1/partners/login` partner login
-- `POST /api/v1/admin/auth/register` admin register
-- `POST /api/v1/admin/auth/login` admin login
+- `POST /api/v1/register`
+- `POST /api/v1/partners/auth/register`
+- `POST /api/v1/partners/auth/login`
+- `POST /api/v1/admin/auth/login`
+- `POST /api/v1/admin/auth/register-with-invitation`
 
-> **Note:** user and admin clients should store tokens in **httpOnly, secure cookies** or in memory. Persisting secrets in `localStorage` is unsafe and has been removed from the default frontends.
+### Partner Integration
 
-### Partner (signed)
+Signed integration requests require:
 
-Headers:
 - `x-api-key`
 - `x-timestamp`
 - `x-signature`
 
 Endpoints:
+
 - `POST /api/v1/partners/events`
 - `POST /api/v1/partners/users/register`
+- `POST /api/v1/partners/users/verify-otp`
+
+### Partner Dashboard
+
+Dashboard requests use the partner session cookie or bearer token issued during login.
+
 - `GET /api/v1/dashboard/partner/events`
-- `GET /api/v1/dashboard/partner/users`
 - `GET /api/v1/dashboard/partner/analytics`
 - `GET /api/v1/dashboard/partner/savings-behavior`
+- `GET /api/v1/dashboard/partner/users`
+- `GET /api/v1/dashboard/partner/notifications`
 
 ### User Dashboard
 
 Header:
-- `x-user-phone`
+
+- `x-user-token`
 
 Endpoints:
+
 - `GET /api/v1/dashboard/user/:userId`
 - `GET /api/v1/dashboard/user/:userId/events`
 - `GET /api/v1/dashboard/user/:userId/transactions`
@@ -83,9 +74,11 @@ Endpoints:
 ### Admin Dashboard
 
 Header:
-- `x-admin-token`
+
+- `x-admin-token` or the admin session cookie
 
 Endpoints:
+
 - `GET /api/v1/dashboard/admin/overview`
 - `GET /api/v1/dashboard/admin/partners`
 - `PATCH /api/v1/dashboard/admin/partners/:partnerId/status`
@@ -94,55 +87,43 @@ Endpoints:
 - `GET /api/v1/dashboard/admin/savings`
 - `GET /api/v1/dashboard/admin/operations`
 
+Admin access routes:
+
+- `GET /api/v1/admin/auth/session`
+- `POST /api/v1/admin/auth/invitations`
+- `GET /api/v1/admin/auth/invitations`
+- `DELETE /api/v1/admin/auth/invitations/:invitationId`
+
 ## Data and Accounting Model
 
 - Wallet balances are stored in `Wallet.balance`.
-- Each successful savings credit writes balanced ledger entries:
-  - `OPERATOR_CLEARING: -amount`
-  - `USER_SAVINGS: +amount`
-- Wallet is incremented by the credited savings amount.
+- Each wallet-affecting flow posts balanced ledger entries.
+- Ledger writes are deduplicated with per-entry idempotency keys.
+- Production money flows expect MongoDB transaction support from a replica set or mongos deployment.
 
-## Environment Variables
+## Demo vs Live
 
-Create `Backend/.env`:
-
-```env
-PORT=5000
-MONGO_URI=mongodb://localhost:27017/betsave
-REDIS_URI=redis://localhost:6379
-SAVINGS_PERCENTAGE=0.1
-
-# security
-ADMIN_DASHBOARD_TOKEN=your_secure_admin_token
-USER_JWT_SECRET=a long random string (min 32 chars)
-USER_JWT_EXPIRATION=7d
-PARTNER_JWT_SECRET=a long random string (min 32 chars)
-PAYMENT_CALLBACK_TOKEN=another_secret_if_you_use_callbacks
-
-# Optional operations readiness flags
-BANK_API_URL=
-BANK_API_KEY=
-BANK_SETTLEMENT_ACCOUNT=
-
-# CORS whitelist (comma separated origins)
-CORS_ALLOWED_ORIGINS=
-```
-
-Optional frontend API base:
-
-- `PartnerFrontend/.env.local`
-  - `NEXT_PUBLIC_API_BASE_URL=http://localhost:5000`
-- `AdminFrontend/.env.local`
-  - `NEXT_PUBLIC_API_BASE_URL=http://localhost:5000`
+- Partner `demo` mode and `live` mode are separated by `operatingMode` on events and event references.
+- Demo event collection can still trigger real STK collection, callback handling, ledger writes, and payment records when Daraja collection is configured.
+- Demo-mode ledger exposure is intended for demo analytics and demo partner views only.
+- Demo mode does not increase the user's live spendable wallet balance in `Wallet.balance`.
+- Admin dashboards can switch between `demo` and `live` to inspect each slice independently.
 
 ## Local Setup
 
-## 1. Start infrastructure
+Create `Backend/.env` from `Backend/.env.example`.
+
+Important notes:
+
+- Standalone local MongoDB is acceptable for UI/demo work when `MONGO_REQUIRE_TRANSACTIONS=false`.
+- Production-grade accounting requires MongoDB transaction support; the Docker stack configures a single-node replica set for this.
+
+### 1. Start Infrastructure
 
 - Start MongoDB
 - Start Redis
 
-## 2. Start backend API
+### 2. Start Backend API
 
 ```powershell
 cd "Backend"
@@ -150,19 +131,24 @@ npm install
 npm run dev
 ```
 
-## 3. Start workers (separate terminals)
+### 3. Start Workers
 
 ```powershell
 cd "Backend"
-node worker/event.worker.js
+npm run worker:event
 ```
 
 ```powershell
 cd "Backend"
-node worker/webhook.worker.js
+npm run worker:webhook
 ```
 
-## 4. Start frontends
+```powershell
+cd "Backend"
+npm run worker:recovery
+```
+
+### 4. Start Frontends
 
 Partner:
 
@@ -180,74 +166,67 @@ npm install
 npm run dev
 ```
 
-## URLs
+## Deployment With Docker
 
-- Partner frontend: `http://localhost:5181`
-- Admin frontend: `http://localhost:5182`
-- Backend API: `http://localhost:5000`
+This repo includes a production-oriented Docker Compose stack that:
 
-## UI Notes
+- boots MongoDB as a replica set
+- secures Redis with a password
+- starts the API, event worker, webhook worker, and recovery worker
+- builds both frontends
 
-- Dashboards auto-refresh every 10 seconds.
-- Event status colors:
-  - `PROCESSED` green
-  - `FAILED` red
-- Credit/debit cells use light red/green backgrounds with darker bold text for clarity.
+### 1. Prepare Environment
 
-## Production Notes
+```powershell
+Copy-Item .env.production.example .env
+```
 
-- Keep API + workers + Redis always running.
-- Use a process manager (PM2/systemd/container orchestration).
-- Store `apiSecret` and admin tokens securely.
-- Keep webhook retries and dead-letter monitoring enabled.
+Then edit `.env` with real values for:
 
-## Deploy With Docker (Recommended Quick Start)
+- `MONGO_INITDB_ROOT_USERNAME`
+- `MONGO_INITDB_ROOT_PASSWORD`
+- `REDIS_PASSWORD`
+- `USER_JWT_SECRET`
+- `PARTNER_JWT_SECRET`
+- `PARTNER_SECRET_ENCRYPTION_KEY`
+- `PAYMENT_CALLBACK_TOKEN`
+- `NEXT_PUBLIC_API_BASE_URL`
+- `CORS_ALLOWED_ORIGINS`
+- Daraja variables if payments are enabled
 
-This repo includes:
+`PAYMENT_CALLBACK_TOKEN` is used server-side to derive per-transaction signed Daraja callback URLs. Do not expose it directly in public callback URLs, frontend code, or shared docs.
 
-- `Backend/Dockerfile`
-- `PartnerFrontend/Dockerfile`
-- `AdminFrontend/Dockerfile`
-- `docker-compose.prod.yml`
-
-### 1. Build and run everything
+### 2. Build and Run
 
 ```powershell
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-### 2. Access services
+### 3. Verify
 
-- Partner frontend: `http://localhost:5181`
-- Admin frontend: `http://localhost:5182`
-- Backend API: `http://localhost:5000`
+- `GET /health` returns `200`
+- partner login works
+- admin login works
+- event worker, webhook worker, and recovery worker logs are healthy
 
-### 3. Stop
+### 4. Stop
 
 ```powershell
 docker compose -f docker-compose.prod.yml down
 ```
 
-### 4. Stop and remove persisted Mongo data
+### 5. Stop and Remove Mongo Data
 
 ```powershell
 docker compose -f docker-compose.prod.yml down -v
 ```
 
-## Deploy To Cloud VM
+## Production Notes
 
-1. Provision a Linux VM (Ubuntu/Debian).
-2. Install Docker + Docker Compose plugin.
-3. Clone this repo.
-4. Edit `docker-compose.prod.yml` env values:
-   - `ADMIN_DASHBOARD_TOKEN`
-   - `SAVINGS_PERCENTAGE`
-   - `BANK_*` values
-   - set frontend API URL to your public backend URL
-5. Run:
-
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-6. Put Nginx/Caddy in front for HTTPS + domain routing.
+- Keep API, workers, MongoDB, and Redis running under orchestration.
+- Put Nginx or Caddy in front for HTTPS and domain routing.
+- Keep API secrets in backend secret management only.
+- Monitor stale pending deposits, stale pending withdrawals, and stale processing events from the admin operations view.
+- Do not rely on the browser to retain partner integration secrets.
+- Existing admins issue invitation codes from the admin dashboard Access view and send those codes to new admins through a secure out-of-band channel.
+- Only the primary admin created during bootstrap can issue, view, or revoke admin invitation codes.

@@ -40,9 +40,17 @@ const ledgerSchema = new mongoose.Schema({
 
     reference: {
         type: String
+    },
+
+    idempotencyKey: {
+        type: String,
+        required: true,
+        trim: true
     }
 
 }, { timestamps: true });
+
+ledgerSchema.index({ idempotencyKey: 1 }, { unique: true });
 
 const Ledger = mongoose.model("Ledger", ledgerSchema);
 

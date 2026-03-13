@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAdminToken, request } from "../../../lib/api";
+import { request } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function AdminDashboardUsers() {
   const router = useRouter();
@@ -46,23 +47,19 @@ export default function AdminDashboardUsers() {
   const activeUsers = filteredUsers.filter((user) => user.status === "ACTIVE").length;
   const usersWithPartners = filteredUsers.filter((user) => Number(user.partnerCount) > 0).length;
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       setError("");
-      const data = await request("/api/v1/dashboard/admin/users?page=1&limit=100", {
-        headers: { "x-admin-token": getAdminToken() }
-      });
+      const data = await request("/api/v1/dashboard/admin/users?page=1&limit=100");
       setUsers(data.users || []);
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    refresh();
-    const intervalId = setInterval(refresh, 10000);
-    return () => clearInterval(intervalId);
-  }, []);
+    return attachVisiblePolling(refresh);
+  }, [refresh]);
 
   return (
     <article className="card space-y-3">

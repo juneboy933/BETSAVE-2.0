@@ -1,6 +1,10 @@
 import crypto from "crypto";
 import Partner from "../../database/models/partner.model.js";
 import { isDatabaseReady } from "../../database/config.js";
+import {
+    encryptPartnerApiSecret
+} from "../../service/partnerAuth.service.js";
+import { resolvePartnerSigningSecret } from "../../service/partnerSecret.service.js";
 
 const SAFE_TIME_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -48,7 +52,7 @@ export const verifyPartner = async (req, res, next) => {
             });
         }
 
-        const partner = await Partner.findOne({ apiKey });
+        const partner = await Partner.findOne({ apiKey }).select("+apiSecret +apiSecretEncrypted");
 
         if (!partner) {
             return res.status(401).json({
@@ -68,8 +72,18 @@ export const verifyPartner = async (req, res, next) => {
         const canonicalPath = normalizePath(req.originalUrl);
         const payload = `${timestamp}${req.method.toUpperCase()}${canonicalPath}${JSON.stringify(canonicalBody)}`;
 
+        const encryptedApiSecret = String(partner.apiSecretEncrypted || "").trim();
+        const legacyApiSecret = String(partner.apiSecret || "").trim();
+        const signingSecret = resolvePartnerSigningSecret(partner);
+        if (!signingSecret) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Partner secret not available for signature verification"
+            });
+        }
+
         const expectedSignature = crypto
-            .createHmac("sha256", partner.apiSecret)
+            .createHmac("sha256", signingSecret)
             .update(payload)
             .digest("hex");
 
@@ -98,6 +112,16 @@ export const verifyPartner = async (req, res, next) => {
             name: partner.name,
             operatingMode: partner.operatingMode || "demo",
         };
+
+        if (!encryptedApiSecret && legacyApiSecret) {
+            Partner.updateOne(
+                { _id: partner._id },
+                {
+                    $set: { apiSecretEncrypted: encryptPartnerApiSecret(legacyApiSecret) },
+                    $unset: { apiSecret: "" }
+                }
+            ).catch(() => {});
+        }
 
         next();
     } catch (error) {

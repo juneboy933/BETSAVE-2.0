@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getPartnerCreds, signedRequest } from "../../lib/api";
+import { partnerRequest } from "../../lib/api";
 
 export default function UsersPage() {
   const [phone, setPhone] = useState("");
@@ -11,14 +11,11 @@ export default function UsersPage() {
 
   const registerUser = async () => {
     try {
-      const creds = getPartnerCreds();
       setErr("");
-      const result = await signedRequest({
+      const result = await partnerRequest("/api/v1/partners/users/register", {
         method: "POST",
-        path: "/api/v1/partners/users/register",
-        body: { phone },
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone })
       });
       setMsg(`User registered: ${result.phoneNumber}`);
       setPhone("");
@@ -30,15 +27,8 @@ export default function UsersPage() {
 
   const loadUsers = async () => {
     try {
-      const creds = getPartnerCreds();
       setErr("");
-      const result = await signedRequest({
-        method: "GET",
-        path: "/api/v1/dashboard/partner/users?page=1&limit=100",
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
-      });
+      const result = await partnerRequest("/api/v1/dashboard/partner/users?page=1&limit=100");
       setUsersData(result.users || []);
     } catch (error) {
       setErr(error.message);

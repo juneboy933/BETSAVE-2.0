@@ -2,12 +2,17 @@ import Event from "../../database/models/event.model.js";
 import Ledger from "../../database/models/ledger.model.js";
 import Partner from "../../database/models/partner.model.js";
 import PartnerUser from "../../database/models/partnerUser.model.js";
+import PaymentTransaction from "../../database/models/paymentTransaction.model.js";
 import User from "../../database/models/user.model.js";
 import Wallet from "../../database/models/wallet.model.js";
+import WorkerStatus from "../../database/models/workerStatus.model.js";
 import mongoose from "mongoose";
 import { sendpartnerWebhook } from "../../service/notifyPartner.service.js";
 import PartnerNotification from "../../database/models/partnerNotification.model.js";
 import AdminNotification from "../../database/models/adminNotification.model.js";
+import { supportsTransactions } from "../../service/databaseSession.service.js";
+import { isDarajaCollectionEnabled, isDarajaDisbursementEnabled } from "../../service/daraja.client.js";
+import { parseEventReference } from "../../service/eventReference.service.js";
 
 const parsePagination = (query) => {
     const page = Math.max(1, Number(query.page) || 1);
@@ -16,11 +21,17 @@ const parsePagination = (query) => {
 };
 
 const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
+const parsePositiveNumber = (value, fallback) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+};
 const normalizeOperatingMode = (value) => {
     const mode = String(value || "").trim().toLowerCase();
     return mode === "demo" ? "demo" : "live";
 };
 const resolveAdminViewMode = (req) => normalizeOperatingMode(req?.query?.operatingMode);
+const WORKER_HEARTBEAT_INTERVAL_MS = 30000;
+const WORKER_HEALTH_GRACE_MS = 15000;
 
 const logAdminDecision = async (req, payload) => {
     try {
@@ -1034,13 +1045,102 @@ export const getAdminSavings = async (req, res) => {
 export const getAdminOperations = async (req, res) => {
     try {
         const operatingMode = resolveAdminViewMode(req);
-        const [failedEvents, suspendedPartners, totalPartnerUsers] = await Promise.all([
+        const stalePendingBefore = new Date(
+            Date.now() - parsePositiveNumber(process.env.STALE_PENDING_PAYMENT_MS, 30 * 60 * 1000)
+        );
+        const staleProcessingBefore = new Date(
+            Date.now() - parsePositiveNumber(process.env.STALE_PROCESSING_EVENT_MS, 10 * 60 * 1000)
+        );
+        const [
+            failedEvents,
+            suspendedPartners,
+            totalPartnerUsers,
+            staleProcessingEvents,
+            stalePendingDeposits,
+            stalePendingWithdrawals,
+            workerStatuses
+        ] = await Promise.all([
             Event.countDocuments({ status: "FAILED", operatingMode }),
             Partner.countDocuments({ status: "SUSPENDED" }),
-            PartnerUser.countDocuments()
+            PartnerUser.countDocuments(),
+            Event.countDocuments({ status: "PROCESSING", updatedAt: { $lt: staleProcessingBefore }, operatingMode }),
+            PaymentTransaction.find({
+                type: "DEPOSIT",
+                status: "PENDING",
+                updatedAt: { $lt: stalePendingBefore }
+            }).select("externalRef").lean(),
+            PaymentTransaction.countDocuments({
+                type: "WITHDRAWAL",
+                status: "PENDING",
+                updatedAt: { $lt: stalePendingBefore }
+            }),
+            WorkerStatus.find({})
+                .select("workerName status hostname pid lastHeartbeatAt lastSuccessAt lastErrorAt errorMessage metadata")
+                .lean()
         ]);
 
+        const depositScope = stalePendingDeposits.reduce((acc, deposit) => {
+            const parsedReference = parseEventReference(deposit.externalRef);
+            const mode = String(parsedReference?.operatingMode || "").trim().toLowerCase();
+
+            if (!parsedReference?.eventId || !["demo", "live"].includes(mode)) {
+                acc.unscoped += 1;
+                return acc;
+            }
+
+            if (mode === operatingMode) {
+                acc.selectedMode += 1;
+            } else {
+                acc.otherMode += 1;
+            }
+
+            return acc;
+        }, {
+            selectedMode: 0,
+            otherMode: 0,
+            unscoped: 0
+        });
+
+        const expectedWorkers = [
+            { workerName: "event-worker", label: "Event Worker", expectedWithinMs: (WORKER_HEARTBEAT_INTERVAL_MS * 2) + WORKER_HEALTH_GRACE_MS },
+            { workerName: "webhook-worker", label: "Webhook Worker", expectedWithinMs: (WORKER_HEARTBEAT_INTERVAL_MS * 2) + WORKER_HEALTH_GRACE_MS },
+            {
+                workerName: "recovery-worker",
+                label: "Recovery Worker",
+                expectedWithinMs: (parsePositiveNumber(process.env.OPERATIONAL_RECOVERY_INTERVAL_MS, 60000) * 2) + WORKER_HEALTH_GRACE_MS
+            }
+        ];
+
+        const workerStatusByName = new Map(workerStatuses.map((worker) => [worker.workerName, worker]));
+        const workers = expectedWorkers.map((workerDefinition) => {
+            const worker = workerStatusByName.get(workerDefinition.workerName) || null;
+            const lastHeartbeatAt = worker?.lastHeartbeatAt ? new Date(worker.lastHeartbeatAt).getTime() : 0;
+            const isHealthy =
+                Boolean(worker) &&
+                worker.status !== "STOPPED" &&
+                worker.status !== "ERROR" &&
+                lastHeartbeatAt > 0 &&
+                Date.now() - lastHeartbeatAt <= workerDefinition.expectedWithinMs;
+
+            return {
+                workerName: workerDefinition.workerName,
+                label: workerDefinition.label,
+                status: isHealthy ? "HEALTHY" : (worker?.status || "MISSING"),
+                isHealthy,
+                hostname: worker?.hostname || null,
+                pid: worker?.pid || null,
+                lastHeartbeatAt: worker?.lastHeartbeatAt || null,
+                lastSuccessAt: worker?.lastSuccessAt || null,
+                lastErrorAt: worker?.lastErrorAt || null,
+                errorMessage: worker?.errorMessage || null,
+                metadata: worker?.metadata || null
+            };
+        });
+
         const integrationReadiness = {
+            darajaCollectionConfigured: isDarajaCollectionEnabled(),
+            darajaDisbursementConfigured: isDarajaDisbursementEnabled(),
+            paymentCallbackTokenConfigured: Boolean(process.env.PAYMENT_CALLBACK_TOKEN),
             bankApiUrlConfigured: Boolean(process.env.BANK_API_URL),
             bankApiKeyConfigured: Boolean(process.env.BANK_API_KEY),
             settlementAccountConfigured: Boolean(process.env.BANK_SETTLEMENT_ACCOUNT)
@@ -1049,16 +1149,36 @@ export const getAdminOperations = async (req, res) => {
         return res.json({
             status: "SUCCESS",
             operations: {
-                failedEvents,
-                suspendedPartners,
-                totalPartnerUsers
+                operatingMode,
+                generatedAt: new Date().toISOString(),
+                scoped: {
+                    failedEvents,
+                    staleProcessingEvents,
+                    stalePendingEventDeposits: depositScope.selectedMode
+                },
+                global: {
+                    suspendedPartners,
+                    totalPartnerUsers,
+                    stalePendingWithdrawals,
+                    stalePendingDepositsOtherMode: depositScope.otherMode,
+                    stalePendingDepositsUnscoped: depositScope.unscoped
+                },
+                thresholds: {
+                    staleProcessingEventMs: parsePositiveNumber(process.env.STALE_PROCESSING_EVENT_MS, 10 * 60 * 1000),
+                    stalePendingPaymentMs: parsePositiveNumber(process.env.STALE_PENDING_PAYMENT_MS, 30 * 60 * 1000)
+                }
             },
             integrationReadiness,
+            runtimeReadiness: {
+                transactionSupport: supportsTransactions(),
+                allWorkersHealthy: workers.every((worker) => worker.isHealthy),
+                workers
+            },
             roadmap: {
                 nextMilestones: [
-                    "Implement settlement deposits to external financial institutions",
-                    "Implement user withdrawal request + approval + disbursement flow",
-                    "Add reconciliation jobs for internal ledger vs bank settlements"
+                    "Wire provider-side settlement reconciliation into ReconciliationRun records",
+                    "Add alert routing for stale pending deposits and withdrawals",
+                    "Add smoke tests for callback, webhook, and recovery flows"
                 ]
             }
         });

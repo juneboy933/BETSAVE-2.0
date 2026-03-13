@@ -1,164 +1,191 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArcElement, Chart as ChartJS, Legend, Tooltip } from "chart.js";
 import AnimatedNumber from "../../components/AnimatedNumber";
 import { partnerRequest } from "../../lib/api";
-import { Pie } from 'react-chartjs-2';
-import Chart from 'chart.js/auto';
+import { attachVisiblePolling } from "../../lib/polling";
+import { Pie } from "react-chartjs-2";
+
+ChartJS.register(ArcElement, Tooltip, Legend);
 
 export default function PartnerDashboardOverview() {
   const [rows, setRows] = useState([]);
   const [statusSummary, setStatusSummary] = useState([]);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalRows, setTotalRows] = useState(0);
+  const [analytics, setAnalytics] = useState({ totalWalletBalance: 0, totalProcessedAmount: 0, totalSavings: 0 });
   const [error, setError] = useState("");
-  const statusClass = (status) =>
-    status === "PROCESSED"
-      ? "bg-emerald-50 text-emerald-800 font-semibold"
-      : status === "FAILED"
-        ? "bg-red-50 text-red-800 font-semibold"
-        : "bg-slate-50 text-slate-700 font-semibold";
-  const amountClass = (value) =>
-    Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
-  const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
+  const statusClass = (status) => {
+    const normalized = String(status || "").toUpperCase();
+    if (normalized === "PROCESSED") return "bg-emerald-50 text-emerald-800 font-semibold";
+    if (normalized === "FAILED") return "bg-rose-50 text-rose-700 font-semibold";
+    return "bg-slate-100 text-slate-700 font-semibold";
+  };
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setError("");
-      const data = await partnerRequest({
-        method: "GET",
-        path: `/api/v1/dashboard/partner/events?page=${currentPage}&limit=10`
+      const [eventData, analyticsData] = await Promise.all([
+        partnerRequest("/api/v1/dashboard/partner/events?page=1&limit=8"),
+        partnerRequest("/api/v1/dashboard/partner/analytics")
+      ]);
+      const events = eventData.events || [];
+      const summary = (analyticsData.stat || []).map((item) => ({
+        status: item._id || "UNKNOWN",
+        count: Number(item.count) || 0
+      }));
+      setRows(events);
+      setStatusSummary(summary);
+      setAnalytics({
+        totalWalletBalance: Number(analyticsData.totalWalletBalance) || 0,
+        totalProcessedAmount: Number(analyticsData.totalProcessedAmount) || 0,
+        totalSavings: Number(analyticsData.totalSavings) || 0
       });
-      setRows(data.events || []);
-      setTotalRows(Number(data.total) || 0);
-      const summary = (data.events || []).reduce((acc, item) => {
-        const key = String(item.status || "UNKNOWN").toUpperCase();
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      }, {});
-      setStatusSummary(Object.entries(summary).map(([status, count]) => ({ status, count })));
     } catch (err) {
       setError(err.message);
     }
-  };
-
+  }, []);
 
   useEffect(() => {
-    load();
-    const intervalId = setInterval(load, 10000);
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [currentPage]);
+    return attachVisiblePolling(load);
+  }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(totalRows / 10));
+  useEffect(() => {
+    const onPartnerModeChanged = () => {
+      load();
+    };
+    window.addEventListener("partner-mode-changed", onPartnerModeChanged);
+    return () => window.removeEventListener("partner-mode-changed", onPartnerModeChanged);
+  }, [load]);
+
+  const processedInView = useMemo(
+    () => rows.filter((item) => String(item.status || "").toUpperCase() === "PROCESSED").length,
+    [rows]
+  );
+  const failedInView = useMemo(
+    () => rows.filter((item) => String(item.status || "").toUpperCase() === "FAILED").length,
+    [rows]
+  );
 
   return (
-    <article className="card space-y-4">
-      <section className="callout">
-        Partner dashboards support manual controls for demos. In live mode, event and user writes are restricted to
-        server-to-server integrations.
-      </section>
+    <section className="space-y-4">
+      <article className="card">
+        <div className="section-head">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Overview</p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-950">Operational snapshot</h2>
+          </div>
+          <button className="btn" onClick={load}>
+            Refresh
+          </button>
+        </div>
+        <div className="stats-grid">
+          <article className="metric-tile">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Attributed wallet balance</p>
+            <p className="mt-2 text-2xl font-bold text-slate-950">
+              <AnimatedNumber value={analytics.totalWalletBalance} />
+            </p>
+          </article>
+          <article className="metric-tile">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Processed event amount</p>
+            <p className="mt-2 text-2xl font-bold text-slate-950">
+              <AnimatedNumber value={analytics.totalProcessedAmount} />
+            </p>
+          </article>
+          <article className="metric-tile">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Total savings</p>
+            <p className="mt-2 text-2xl font-bold text-slate-950">
+              <AnimatedNumber value={analytics.totalSavings} />
+            </p>
+          </article>
+          <article className="metric-tile">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Events in focus</p>
+            <p className="mt-2 text-2xl font-bold text-slate-950">
+              <AnimatedNumber value={rows.length} />
+            </p>
+          </article>
+        </div>
+      </article>
 
-      <div className="section-head">
-        <h2 className="text-lg font-bold">Recent Partner Events</h2>
-        <button className="btn" onClick={load}>
-          Refresh
-        </button>
-      </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+        <article className="card">
+          <div className="section-head">
+            <div>
+              <h3 className="text-lg font-bold text-slate-950">Recent partner events</h3>
+              <p className="text-sm text-slate-500">Latest platform activity pulled from the dashboard API.</p>
+            </div>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              Auto-refresh 30s
+            </span>
+          </div>
+          {error ? <p className="mb-3 text-sm font-semibold text-rose-700">{error}</p> : null}
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Event ID</th>
+                  <th>Phone</th>
+                  <th>Status</th>
+                  <th>Amount</th>
+                  <th>Savings</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row._id}>
+                    <td className="mono text-xs">{row.eventId}</td>
+                    <td>{row.phone}</td>
+                    <td className={statusClass(row.status)}>{row.status}</td>
+                    <td>{Number(row.amount) || 0}</td>
+                    <td>{Number(row.savingsAmount) || 0}</td>
+                  </tr>
+                ))}
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="text-center text-slate-500">
+                      No events loaded.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </article>
 
-      <div className="stats-grid">
-        <article className="metric-tile">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Loaded Rows</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900"><AnimatedNumber value={rows.length} /></p>
-        </article>
-        <article className="metric-tile">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Total Event Rows</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900"><AnimatedNumber value={totalRows} /></p>
-        </article>
-        <article className="metric-tile">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Processed In View</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">
-            <AnimatedNumber value={statusSummary.find((item) => item.status === "PROCESSED")?.count || 0} />
-          </p>
-        </article>
-        <article className="metric-tile">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Failed In View</p>
-          <p className="mt-1 text-2xl font-bold text-slate-900">
-            <AnimatedNumber value={statusSummary.find((item) => item.status === "FAILED")?.count || 0} />
-          </p>
+        <article className="card">
+          <h3 className="text-lg font-bold text-slate-950">Status mix</h3>
+          <p className="mt-1 text-sm text-slate-500">Current distribution of partner event outcomes.</p>
+          <div className="mt-5 grid gap-4">
+            <div className="mx-auto w-full max-w-sm">
+              <Pie
+                data={{
+                  labels: statusSummary.map((item) => item.status),
+                  datasets: [
+                    {
+                      data: statusSummary.map((item) => item.count),
+                      backgroundColor: ["#34d399", "#f87171", "#94a3b8", "#fbbf24"]
+                    }
+                  ]
+                }}
+                options={{ plugins: { legend: { position: "bottom" } } }}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Processed in focus</p>
+                <p className="mt-2 text-2xl font-bold text-slate-950">
+                  <AnimatedNumber value={processedInView} />
+                </p>
+              </article>
+              <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Failed in focus</p>
+                <p className="mt-2 text-2xl font-bold text-slate-950">
+                  <AnimatedNumber value={failedInView} />
+                </p>
+              </article>
+            </div>
+          </div>
         </article>
       </div>
-
-      {error && <p className="mb-2 text-sm font-semibold text-red-700">{error}</p>}
-      {/* chart of status distribution */}
-      <div className="w-full max-w-md">
-        <Pie
-          data={{
-            labels: statusSummary.map((s) => s.status),
-            datasets: [
-              {
-                data: statusSummary.map((s) => s.count),
-                backgroundColor: [
-                  '#34d399',
-                  '#f87171',
-                  '#a1a1aa'
-                ]
-              }
-            ]
-          }}
-          options={{
-            plugins: { legend: { position: 'bottom' } }
-          }}
-        />
-      </div>
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Event ID</th>
-              <th>Phone</th>
-              <th>Status</th>
-              <th>Amount</th>
-              <th>Savings Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r._id}>
-                <td>{r.eventId}</td>
-                <td>{r.phone}</td>
-                <td className={statusClass(r.status)}>{r.status}</td>
-                <td className={amountClass(r.amount)}>{amountLabel(r.amount)}</td>
-                <td className={amountClass(r.savingsAmount)}>{amountLabel(r.savingsAmount)}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5} className="text-center text-slate-500">
-                  No events loaded.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div className="mt-3 flex items-center justify-end gap-2">
-        <button className="btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
-          Previous
-        </button>
-        <p className="text-xs font-medium text-slate-500">
-          Page {currentPage} of {totalPages}
-        </p>
-        <button
-          className="btn"
-          disabled={currentPage >= totalPages}
-          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-        >
-          Next
-        </button>
-      </div>
-
-    </article>
+    </section>
   );
 }

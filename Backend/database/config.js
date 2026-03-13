@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { setTransactionSupport } from "../service/databaseSession.service.js";
 
 const dbConfigDir = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(dbConfigDir, "../.env") });
@@ -15,6 +16,17 @@ if (!mongoUri) {
 const parseNumber = (value, fallback) => {
     const numeric = Number(value);
     return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+};
+
+const parseBoolean = (value, fallback = false) => {
+    if (value === undefined || value === null || String(value).trim() === "") {
+        return fallback;
+    }
+
+    const normalized = String(value).trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+    return fallback;
 };
 
 let listenersAttached = false;
@@ -41,6 +53,11 @@ const attachConnectionListeners = () => {
 };
 
 export const isDatabaseReady = () => mongoose.connection.readyState === 1;
+
+const detectTransactionSupport = async () => {
+    const hello = await mongoose.connection.db.admin().command({ hello: 1 });
+    return Boolean(hello?.setName || hello?.msg === "isdbgrid");
+};
 
 export const connectDB = async () => {
     attachConnectionListeners();
@@ -69,6 +86,23 @@ export const connectDB = async () => {
                 maxIdleTimeMS
             });
 
+            const transactionsSupported = await detectTransactionSupport();
+            setTransactionSupport(transactionsSupported);
+
+            const requireTransactions = parseBoolean(
+                process.env.MONGO_REQUIRE_TRANSACTIONS,
+                String(process.env.NODE_ENV || "").trim().toLowerCase() === "production"
+            );
+
+            if (requireTransactions && !transactionsSupported) {
+                throw new Error(
+                    "MongoDB transactions are required but unsupported. Configure a replica set or mongos deployment."
+                );
+            }
+
+            console.log(
+                `MongoDB transaction support: ${transactionsSupported ? "ENABLED" : "DISABLED"}`
+            );
             console.log("Database connected successfully");
             return mongoose.connection;
         } catch (error) {

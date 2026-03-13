@@ -3,7 +3,6 @@ import PaymentTransaction from "../../database/models/paymentTransaction.model.j
 import WithdrawalRequest from "../../database/models/withdrawalRequest.model.js";
 import Event from "../../database/models/event.model.js";
 import Partner from "../../database/models/partner.model.js";
-import { webhookQueue } from "../../worker/queues.js";
 import {
     isDarajaCollectionEnabled,
     isDarajaDisbursementEnabled,
@@ -20,117 +19,58 @@ import {
     markWithdrawalDisbursed,
     markWithdrawalFailed
 } from "../../service/paymentWithdrawal.service.js";
+import {
+    normalizeOperatingMode,
+    parseEventReference
+} from "../../service/eventReference.service.js";
+import { finalizeEvent } from "../../service/eventFinalization.service.js";
+import {
+    buildSignedCallbackUrl,
+    verifySignedCallbackToken
+} from "../../service/paymentCallbackSecurity.service.js";
+import {
+    ensureCallbackResourceBinding,
+    parseDepositCallbackPayload,
+    parseWithdrawalCallbackPayload,
+    validateDepositSettlement,
+    validateWithdrawalSettlement
+} from "../../service/paymentCallbackValidation.service.js";
 
 const isSuccessStatus = (status) => {
     const normalized = String(status || "").trim().toUpperCase();
     return ["SUCCESS", "SUCCEEDED", "PROCESSED", "COMPLETED", "OK"].includes(normalized);
 };
 
-const normalizeOperatingMode = (value) => {
-    const mode = String(value || "").trim().toLowerCase();
-    if (mode === "live") return "live";
-    if (mode === "demo") return "demo";
-    return null;
-};
+const getSignedCallbackResourceId = ({ req, res, callbackType, resourceParamName }) => {
+    const resourceId = String(req.query?.[resourceParamName] || "").trim();
+    const providedToken = String(req.query?.callbackToken || "").trim();
+    const providedCallbackType = String(req.query?.callbackType || "")
+        .trim()
+        .toLowerCase();
 
-const mapMetadataItems = (items) => {
-    if (!Array.isArray(items)) {
-        return {};
-    }
-
-    return items.reduce((acc, item) => {
-        const key = String(item?.Name || "").trim();
-        if (!key) return acc;
-        acc[key] = item?.Value;
-        return acc;
-    }, {});
-};
-
-const parseDepositCallbackPayload = (payload) => {
-    const stkCallback = payload?.Body?.stkCallback;
-
-    if (stkCallback) {
-        const metadata = mapMetadataItems(stkCallback?.CallbackMetadata?.Item);
-        const resultCode = Number(stkCallback?.ResultCode);
-
-        return {
-            paymentTransactionId: payload?.paymentTransactionId || null,
-            providerRequestId: stkCallback?.CheckoutRequestID || payload?.providerRequestId || null,
-            providerTransactionId: metadata?.MpesaReceiptNumber || stkCallback?.MerchantRequestID || payload?.providerTransactionId || null,
-            externalRef: metadata?.AccountReference || payload?.externalRef || null,
-            status: Number.isFinite(resultCode) && resultCode === 0 ? "SUCCESS" : "FAILED",
-            failureReason: stkCallback?.ResultDesc || payload?.failureReason || null,
-            rawCallback: payload
-        };
-    }
-
-    return {
-        paymentTransactionId: payload?.paymentTransactionId || null,
-        providerRequestId: payload?.providerRequestId || null,
-        providerTransactionId: payload?.providerTransactionId || null,
-        externalRef: payload?.externalRef || null,
-        status: payload?.status || null,
-        failureReason: payload?.failureReason || null,
-        rawCallback: payload
-    };
-};
-
-const parseWithdrawalCallbackPayload = (payload) => {
-    const result = payload?.Result;
-
-    if (result) {
-        const resultCode = Number(result?.ResultCode);
-
-        return {
-            withdrawalRequestId: payload?.withdrawalRequestId || null,
-            providerRequestId: result?.OriginatorConversationID || payload?.providerRequestId || null,
-            providerTransactionId: result?.ConversationID || result?.TransactionID || payload?.providerTransactionId || null,
-            externalRef: payload?.externalRef || null,
-            status: Number.isFinite(resultCode) && resultCode === 0 ? "SUCCESS" : "FAILED",
-            failureReason: result?.ResultDesc || payload?.failureReason || null,
-            rawCallback: payload
-        };
-    }
-
-    return {
-        withdrawalRequestId: payload?.withdrawalRequestId || null,
-        providerRequestId: payload?.providerRequestId || null,
-        providerTransactionId: payload?.providerTransactionId || null,
-        externalRef: payload?.externalRef || null,
-        status: payload?.status || null,
-        failureReason: payload?.failureReason || null,
-        rawCallback: payload
-    };
-};
-
-import crypto from "crypto";
-
-const assertCallbackAuth = (req, res) => {
-    const expectedToken = String(process.env.PAYMENT_CALLBACK_TOKEN || "").trim();
-    if (!expectedToken) {
-        // no token configured, allow callback (not recommended for prod)
-        return true;
-    }
-
-    const providedToken = String(req.headers["x-callback-token"] || "").trim();
-    const expectedBuffer = Buffer.from(expectedToken, "utf8");
-    const providedBuffer = Buffer.from(providedToken, "utf8");
-    const valid =
-        expectedBuffer.length === providedBuffer.length &&
-        crypto.timingSafeEqual(expectedBuffer, providedBuffer);
-
-    if (!valid) {
+    if (
+        !resourceId ||
+        !providedToken ||
+        (providedCallbackType && providedCallbackType !== callbackType) ||
+        !verifySignedCallbackToken({ callbackType, resourceId, providedToken })
+    ) {
         res.status(401).json({
             status: "FAILED",
             reason: "Unauthorized callback"
         });
-        return false;
+        return null;
     }
 
-    return true;
+    return resourceId;
 };
 
-const resolveDepositTransactionId = async ({ paymentTransactionId, providerRequestId, providerTransactionId, externalRef }) => {
+const resolveDepositTransactionId = async ({
+    paymentTransactionId,
+    providerRequestId,
+    providerTransactionId,
+    externalRef,
+    paymentTransactionModel = PaymentTransaction
+}) => {
     if (mongoose.Types.ObjectId.isValid(paymentTransactionId)) {
         return paymentTransactionId;
     }
@@ -144,7 +84,7 @@ const resolveDepositTransactionId = async ({ paymentTransactionId, providerReque
         return null;
     }
 
-    const paymentTransaction = await PaymentTransaction.findOne({
+    const paymentTransaction = await paymentTransactionModel.findOne({
         type: "DEPOSIT",
         $or: orConditions
     }).select("_id");
@@ -152,7 +92,13 @@ const resolveDepositTransactionId = async ({ paymentTransactionId, providerReque
     return paymentTransaction?._id ? String(paymentTransaction._id) : null;
 };
 
-const resolveWithdrawalRequestId = async ({ withdrawalRequestId, providerRequestId, providerTransactionId }) => {
+const resolveWithdrawalRequestId = async ({
+    withdrawalRequestId,
+    providerRequestId,
+    providerTransactionId,
+    paymentTransactionModel = PaymentTransaction,
+    withdrawalRequestModel = WithdrawalRequest
+}) => {
     if (mongoose.Types.ObjectId.isValid(withdrawalRequestId)) {
         return withdrawalRequestId;
     }
@@ -165,7 +111,7 @@ const resolveWithdrawalRequestId = async ({ withdrawalRequestId, providerRequest
         return null;
     }
 
-    const paymentTransaction = await PaymentTransaction.findOne({
+    const paymentTransaction = await paymentTransactionModel.findOne({
         type: "WITHDRAWAL",
         $or: orConditions
     }).select("_id");
@@ -174,50 +120,21 @@ const resolveWithdrawalRequestId = async ({ withdrawalRequestId, providerRequest
         return null;
     }
 
-    const withdrawalRequest = await WithdrawalRequest.findOne({
+    const withdrawalRequest = await withdrawalRequestModel.findOne({
         paymentTransactionId: paymentTransaction._id
     }).select("_id");
 
     return withdrawalRequest?._id ? String(withdrawalRequest._id) : null;
 };
 
-const parseEventReference = (externalRef) => {
-    const raw = String(externalRef || "").trim();
-    if (!raw) {
-        return null;
-    }
-
-    if (raw.startsWith("EVENT::")) {
-        const parts = raw.split("::");
-        if (parts.length >= 4) {
-            const partnerName = String(parts[1] || "").trim();
-            const operatingMode = normalizeOperatingMode(parts[2]);
-            const eventId = String(parts.slice(3).join("::") || "").trim();
-            if (partnerName && eventId && operatingMode) {
-                return { partnerName, operatingMode, eventId };
-            }
-        }
-        if (parts.length >= 3) {
-            const partnerName = String(parts[1] || "").trim();
-            const eventId = String(parts.slice(2).join("::") || "").trim();
-            if (partnerName && eventId) {
-                return { partnerName, eventId };
-            }
-        }
-    }
-
-    if (raw.startsWith("EVENT_")) {
-        const eventId = String(raw.slice("EVENT_".length) || "").trim();
-        if (eventId) {
-            return { eventId };
-        }
-    }
-
-    return null;
-};
-
-const resolvePartnerModeForDeposit = async ({ parsedExternalRef, paymentTransactionId }) => {
-    const paymentTransaction = await PaymentTransaction.findById(paymentTransactionId)
+const resolvePartnerModeForDeposit = async ({
+    parsedExternalRef,
+    paymentTransactionId,
+    paymentTransactionModel = PaymentTransaction,
+    eventModel = Event,
+    partnerModel = Partner
+}) => {
+    const paymentTransaction = await paymentTransactionModel.findById(paymentTransactionId)
         .select("externalRef userId")
         .lean();
     const eventRef = parseEventReference(parsedExternalRef || paymentTransaction?.externalRef);
@@ -232,20 +149,20 @@ const resolvePartnerModeForDeposit = async ({ parsedExternalRef, paymentTransact
             eventQuery.userId = paymentTransaction.userId;
         }
 
-        let matchedEvent = await Event.findOne(eventQuery)
+        let matchedEvent = await eventModel.findOne(eventQuery)
             .sort({ createdAt: -1 })
             .select("partnerName operatingMode")
             .lean();
 
         if (!matchedEvent && paymentTransaction?.userId) {
-            matchedEvent = await Event.findOne({ eventId: eventRef.eventId, userId: paymentTransaction.userId })
+            matchedEvent = await eventModel.findOne({ eventId: eventRef.eventId, userId: paymentTransaction.userId })
                 .sort({ createdAt: -1 })
                 .select("partnerName operatingMode")
                 .lean();
         }
 
         if (!matchedEvent) {
-            matchedEvent = await Event.findOne({ eventId: eventRef.eventId })
+            matchedEvent = await eventModel.findOne({ eventId: eventRef.eventId })
                 .sort({ createdAt: -1 })
                 .select("partnerName operatingMode")
                 .lean();
@@ -263,7 +180,7 @@ const resolvePartnerModeForDeposit = async ({ parsedExternalRef, paymentTransact
 
     let partnerName = String(eventRef?.partnerName || "").trim();
     if (!partnerName && eventRef?.eventId) {
-        const matchedEvent = await Event.findOne({ eventId: eventRef.eventId })
+        const matchedEvent = await eventModel.findOne({ eventId: eventRef.eventId })
             .sort({ createdAt: -1 })
             .select("partnerName")
             .lean();
@@ -274,81 +191,23 @@ const resolvePartnerModeForDeposit = async ({ parsedExternalRef, paymentTransact
         return "live";
     }
 
-    const partner = await Partner.findOne({ name: partnerName })
+    const partner = await partnerModel.findOne({ name: partnerName })
         .select("operatingMode")
         .lean();
     return normalizeOperatingMode(partner?.operatingMode) || "demo";
 };
 
-const finalizeEventFromDepositTransaction = async ({ paymentTransaction, success, failureReason = null }) => {
-    if (!paymentTransaction || paymentTransaction.type !== "DEPOSIT") {
-        return null;
-    }
-
-    if (String(paymentTransaction.channel || "").toUpperCase() !== "STK") {
-        return null;
-    }
-
-    const eventRef = parseEventReference(paymentTransaction.externalRef);
-    if (!eventRef?.eventId) {
-        return null;
-    }
-
-    const query = {
-        eventId: eventRef.eventId,
-        userId: paymentTransaction.userId,
-        status: "PROCESSING"
-    };
-
-    if (eventRef.partnerName) {
-        query.partnerName = eventRef.partnerName;
-    }
-    if (eventRef.operatingMode) {
-        query.operatingMode = eventRef.operatingMode;
-    }
-
-    const nextStatus = success ? "PROCESSED" : "FAILED";
-    const event = await Event.findOneAndUpdate(
-        query,
-        { $set: { status: nextStatus } },
-        { returnDocument: "after" }
-    ).lean();
-
-    if (!event) {
-        return null;
-    }
-
-    const result = success
-        ? {
-            status: "PROCESSED",
-            savingsAmount: Number(paymentTransaction.amount) || 0,
-            paymentStatus: paymentTransaction.status,
-            paymentTransactionId: String(paymentTransaction._id)
-        }
-        : {
-            status: "FAILED",
-            reason: String(failureReason || paymentTransaction.failureReason || "STK payment failed"),
-            paymentStatus: paymentTransaction.status,
-            paymentTransactionId: String(paymentTransaction._id)
-        };
-
-    try {
-        await webhookQueue.add("send-webhook", {
-            eventId: event.eventId,
-            partnerName: event.partnerName,
-            result
-        }, {
-            jobId: `webhook-${event.partnerName}-${event.eventId}`,
-            attempts: 5,
-            backoff: { type: "exponential", delay: 10000 },
-            removeOnComplete: true,
-            removeOnFail: false
-        });
-    } catch (error) {
-        console.error("Failed to enqueue callback webhook job:", error.message);
-    }
-
-    return event;
+const defaultPaymentCallbackHandlerDeps = {
+    eventModel: Event,
+    partnerModel: Partner,
+    paymentTransactionModel: PaymentTransaction,
+    withdrawalRequestModel: WithdrawalRequest,
+    confirmDepositImpl: confirmDeposit,
+    failDepositImpl: failDeposit,
+    finalizeEventImpl: finalizeEvent,
+    markWithdrawalDisbursedImpl: markWithdrawalDisbursed,
+    markWithdrawalFailedImpl: markWithdrawalFailed,
+    resolvePartnerModeForDepositImpl: resolvePartnerModeForDeposit
 };
 
 export const createDeposit = async (req, res) => {
@@ -405,7 +264,12 @@ export const createDeposit = async (req, res) => {
                 phone: paymentTransaction.phone,
                 amount: paymentTransaction.amount,
                 accountReference,
-                transactionDesc: "Betsave deposit"
+                transactionDesc: "Betsave deposit",
+                callbackUrl: buildSignedCallbackUrl({
+                    baseUrl: process.env.DARAJA_STK_CALLBACK_URL,
+                    callbackType: "deposit",
+                    resourceId: paymentTransaction._id
+                })
             });
 
             paymentTransaction.status = "PENDING";
@@ -481,7 +345,17 @@ export const createWithdrawal = async (req, res) => {
                     phone: paymentTransaction.phone,
                     amount: paymentTransaction.amount,
                     remarks: "Betsave withdrawal",
-                    occasion: `BETSAVE_WD_${withdrawalRequest._id}`
+                    occasion: `BETSAVE_WD_${withdrawalRequest._id}`,
+                    timeoutUrl: buildSignedCallbackUrl({
+                        baseUrl: process.env.DARAJA_B2C_TIMEOUT_URL,
+                        callbackType: "withdrawal",
+                        resourceId: withdrawalRequest._id
+                    }),
+                    resultUrl: buildSignedCallbackUrl({
+                        baseUrl: process.env.DARAJA_B2C_RESULT_URL,
+                        callbackType: "withdrawal",
+                        resourceId: withdrawalRequest._id
+                    })
                 });
 
                 paymentTransaction.providerRequestId = providerAck.originatorConversationId || paymentTransaction.providerRequestId;
@@ -510,103 +384,218 @@ export const createWithdrawal = async (req, res) => {
     }
 };
 
-export const handleDepositCallback = async (req, res) => {
-    try {
-        if (!assertCallbackAuth(req, res)) {
-            return;
-        }
+export const createPaymentCallbackHandlers = (deps = {}) => {
+    const {
+        eventModel,
+        partnerModel,
+        paymentTransactionModel,
+        withdrawalRequestModel,
+        confirmDepositImpl,
+        failDepositImpl,
+        finalizeEventImpl,
+        markWithdrawalDisbursedImpl,
+        markWithdrawalFailedImpl,
+        resolvePartnerModeForDepositImpl
+    } = { ...defaultPaymentCallbackHandlerDeps, ...deps };
 
-        const parsed = parseDepositCallbackPayload(req.body || {});
-        const resolvedPaymentTransactionId = await resolveDepositTransactionId(parsed);
-
-        if (!mongoose.Types.ObjectId.isValid(resolvedPaymentTransactionId)) {
-            return res.status(400).json({
-                status: "FAILED",
-                reason: "Unable to resolve payment transaction id from callback"
+    const handleDepositCallback = async (req, res) => {
+        try {
+            const hintedPaymentTransactionId = getSignedCallbackResourceId({
+                req,
+                res,
+                callbackType: "deposit",
+                resourceParamName: "paymentTransactionId"
             });
-        }
 
-        const callbackIsSuccess = isSuccessStatus(parsed.status);
-        const partnerMode = await resolvePartnerModeForDeposit({
-            parsedExternalRef: parsed.externalRef,
-            paymentTransactionId: resolvedPaymentTransactionId
-        });
+            if (!hintedPaymentTransactionId) {
+                return;
+            }
 
-        const paymentTransaction = callbackIsSuccess
-            ? await confirmDeposit({
-                paymentTransactionId: resolvedPaymentTransactionId,
+            const parsed = parseDepositCallbackPayload(req.body || {});
+            const resolvedPaymentTransactionId = await resolveDepositTransactionId({
                 providerRequestId: parsed.providerRequestId,
                 providerTransactionId: parsed.providerTransactionId,
                 externalRef: parsed.externalRef,
-                rawCallback: parsed.rawCallback,
-                applyWalletCredit: partnerMode === "live"
-            })
-            : await failDeposit({
-                paymentTransactionId: resolvedPaymentTransactionId,
-                failureReason: parsed.failureReason,
-                rawCallback: parsed.rawCallback
+                paymentTransactionModel
+            });
+            const canonicalPaymentTransactionId = ensureCallbackResourceBinding({
+                callbackType: "deposit",
+                hintedResourceId: hintedPaymentTransactionId,
+                payloadResourceId: parsed.paymentTransactionId,
+                resolvedResourceId: resolvedPaymentTransactionId
             });
 
-        await finalizeEventFromDepositTransaction({
-            paymentTransaction,
-            success: callbackIsSuccess,
-            failureReason: parsed.failureReason
-        });
+            if (!mongoose.Types.ObjectId.isValid(canonicalPaymentTransactionId)) {
+                return res.status(400).json({
+                    status: "FAILED",
+                    reason: "Invalid payment transaction id in callback"
+                });
+            }
 
-        return res.json({
-            status: "SUCCESS",
-            paymentTransaction
-        });
-    } catch (error) {
-        return res.status(400).json({
-            status: "FAILED",
-            reason: error.message
-        });
-    }
-};
+            const callbackIsSuccess = isSuccessStatus(parsed.status);
+            const paymentTransactionRecord = await paymentTransactionModel.findById(canonicalPaymentTransactionId)
+                .select("_id amount phone externalRef channel providerRequestId userId")
+                .lean();
 
-export const handleWithdrawalCallback = async (req, res) => {
-    try {
-        if (!assertCallbackAuth(req, res)) {
-            return;
-        }
+            if (!paymentTransactionRecord) {
+                return res.status(404).json({
+                    status: "FAILED",
+                    reason: "Payment transaction not found"
+                });
+            }
 
-        const parsed = parseWithdrawalCallbackPayload(req.body || {});
-        const resolvedWithdrawalRequestId = await resolveWithdrawalRequestId(parsed);
+            validateDepositSettlement({
+                paymentTransaction: paymentTransactionRecord,
+                parsed,
+                requireStructuredMetadata: callbackIsSuccess && Boolean(req.body?.Body?.stkCallback)
+            });
 
-        if (!mongoose.Types.ObjectId.isValid(resolvedWithdrawalRequestId)) {
+            const partnerMode = await resolvePartnerModeForDepositImpl({
+                parsedExternalRef: parsed.externalRef,
+                paymentTransactionId: canonicalPaymentTransactionId,
+                paymentTransactionModel,
+                eventModel,
+                partnerModel
+            });
+
+            const paymentTransaction = callbackIsSuccess
+                ? await confirmDepositImpl({
+                    paymentTransactionId: canonicalPaymentTransactionId,
+                    providerRequestId: parsed.providerRequestId,
+                    providerTransactionId: parsed.providerTransactionId,
+                    externalRef: parsed.externalRef,
+                    rawCallback: parsed.rawCallback,
+                    applyWalletCredit: partnerMode === "live",
+                    recordLiabilityLedger: true
+                })
+                : await failDepositImpl({
+                    paymentTransactionId: canonicalPaymentTransactionId,
+                    failureReason: parsed.failureReason,
+                    rawCallback: parsed.rawCallback
+                });
+
+            if (String(paymentTransaction.channel || paymentTransactionRecord.channel || "").toUpperCase() === "STK") {
+                await finalizeEventImpl({
+                    paymentTransaction,
+                    nextStatus: callbackIsSuccess ? "PROCESSED" : "FAILED",
+                    failureReason: parsed.failureReason,
+                    notifyPartner: true
+                });
+            }
+
+            return res.json({
+                status: "SUCCESS",
+                paymentTransaction
+            });
+        } catch (error) {
             return res.status(400).json({
                 status: "FAILED",
-                reason: "Unable to resolve withdrawal request id from callback"
+                reason: error.message
             });
         }
+    };
 
-        const { paymentTransaction, withdrawalRequest } = isSuccessStatus(parsed.status)
-            ? await markWithdrawalDisbursed({
-                withdrawalRequestId: resolvedWithdrawalRequestId,
-                providerRequestId: parsed.providerRequestId,
-                providerTransactionId: parsed.providerTransactionId,
-                externalRef: parsed.externalRef,
-                rawCallback: parsed.rawCallback
-            })
-            : await markWithdrawalFailed({
-                withdrawalRequestId: resolvedWithdrawalRequestId,
-                failureReason: parsed.failureReason,
-                rawCallback: parsed.rawCallback
+    const handleWithdrawalCallback = async (req, res) => {
+        try {
+            const hintedWithdrawalRequestId = getSignedCallbackResourceId({
+                req,
+                res,
+                callbackType: "withdrawal",
+                resourceParamName: "withdrawalRequestId"
             });
 
-        return res.json({
-            status: "SUCCESS",
-            paymentTransaction,
-            withdrawalRequest
-        });
-    } catch (error) {
-        return res.status(400).json({
-            status: "FAILED",
-            reason: error.message
-        });
-    }
+            if (!hintedWithdrawalRequestId) {
+                return;
+            }
+
+            const parsed = parseWithdrawalCallbackPayload(req.body || {});
+            const resolvedWithdrawalRequestId = await resolveWithdrawalRequestId({
+                providerRequestId: parsed.providerRequestId,
+                providerTransactionId: parsed.providerTransactionId,
+                paymentTransactionModel,
+                withdrawalRequestModel
+            });
+            const canonicalWithdrawalRequestId = ensureCallbackResourceBinding({
+                callbackType: "withdrawal",
+                hintedResourceId: hintedWithdrawalRequestId,
+                payloadResourceId: parsed.withdrawalRequestId,
+                resolvedResourceId: resolvedWithdrawalRequestId
+            });
+
+            if (!mongoose.Types.ObjectId.isValid(canonicalWithdrawalRequestId)) {
+                return res.status(400).json({
+                    status: "FAILED",
+                    reason: "Invalid withdrawal request id in callback"
+                });
+            }
+
+            const withdrawalRequestRecord = await withdrawalRequestModel.findById(canonicalWithdrawalRequestId)
+                .select("_id amount status paymentTransactionId")
+                .lean();
+
+            if (!withdrawalRequestRecord?.paymentTransactionId) {
+                return res.status(404).json({
+                    status: "FAILED",
+                    reason: "Withdrawal request not found"
+                });
+            }
+
+            const paymentTransactionRecord = await paymentTransactionModel.findById(withdrawalRequestRecord.paymentTransactionId)
+                .select("_id amount phone externalRef providerRequestId status")
+                .lean();
+
+            if (!paymentTransactionRecord) {
+                return res.status(404).json({
+                    status: "FAILED",
+                    reason: "Payment transaction not found"
+                });
+            }
+
+            const callbackIsSuccess = isSuccessStatus(parsed.status);
+            validateWithdrawalSettlement({
+                paymentTransaction: paymentTransactionRecord,
+                withdrawalRequest: withdrawalRequestRecord,
+                parsed,
+                requireStructuredMetadata: callbackIsSuccess && Boolean(req.body?.Result)
+            });
+
+            const { paymentTransaction, withdrawalRequest } = callbackIsSuccess
+                ? await markWithdrawalDisbursedImpl({
+                    withdrawalRequestId: canonicalWithdrawalRequestId,
+                    providerRequestId: parsed.providerRequestId,
+                    providerTransactionId: parsed.providerTransactionId,
+                    externalRef: parsed.externalRef,
+                    rawCallback: parsed.rawCallback
+                })
+                : await markWithdrawalFailedImpl({
+                    withdrawalRequestId: canonicalWithdrawalRequestId,
+                    failureReason: parsed.failureReason,
+                    rawCallback: parsed.rawCallback
+                });
+
+            return res.json({
+                status: "SUCCESS",
+                paymentTransaction,
+                withdrawalRequest
+            });
+        } catch (error) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: error.message
+            });
+        }
+    };
+
+    return {
+        handleDepositCallback,
+        handleWithdrawalCallback
+    };
 };
+
+export const {
+    handleDepositCallback,
+    handleWithdrawalCallback
+} = createPaymentCallbackHandlers();
 
 export const getPaymentTransactionById = async (req, res) => {
     try {

@@ -4,8 +4,10 @@ import { validateBody } from "../middleware/validation.middleware.js";
 import {
     registerPartnerAuth,
     loginPartnerAuth,
+    logoutPartnerAuth,
     refreshPartnerToken
 } from "../controller/partnerAuth.controller.js";
+import { verifyPartnerDashboard } from "../middleware/partnerDashboardAuth.middleware.js";
 
 const router = express.Router();
 
@@ -25,5 +27,6 @@ const loginSchema = Joi.object({
 router.post("/register", validateBody(registrationSchema), registerPartnerAuth);
 router.post("/login", validateBody(loginSchema), loginPartnerAuth);
 router.post("/refresh", refreshPartnerToken);
+router.post("/logout", verifyPartnerDashboard, logoutPartnerAuth);
 
 export default router;

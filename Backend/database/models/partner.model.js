@@ -22,7 +22,13 @@ const partnerSchema = new mongoose.Schema({
     },
     apiSecret: {
         type: String,
-        required: true
+        default: null,
+        select: false
+    },
+    apiSecretEncrypted: {
+        type: String,
+        default: null,
+        select: false
     },
     status: {
         type: String,

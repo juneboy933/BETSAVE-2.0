@@ -40,6 +40,11 @@ const adminSchema = new mongoose.Schema(
         lastLoginAt: {
             type: Date,
             default: null
+        },
+        isPrimaryAdmin: {
+            type: Boolean,
+            default: false,
+            index: true
         }
     },
     { timestamps: true }

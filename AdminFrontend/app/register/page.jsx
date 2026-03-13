@@ -63,7 +63,7 @@ export default function AdminRegisterPage() {
             Already registered? <Link className="font-semibold text-brand" href="/login">Login here</Link>.
           </p>
           <p className="mt-3 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-900">
-            Admins can only register using an invitation code from an existing admin.
+            Admins can only register using an invitation code created by an existing admin from Dashboard Access.
           </p>
 
           <label className="label">Backend API URL</label>

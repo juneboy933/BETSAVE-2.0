@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getApiBase, setApiBase, setPartnerCreds, setPartnerName, registerPartnerAuth } from "../../lib/api";
+import { getApiBase, setApiBase, setPartnerName, registerPartnerAuth } from "../../lib/api";
 
 export default function PartnerRegisterPage() {
   const router = useRouter();
@@ -48,14 +48,6 @@ export default function PartnerRegisterPage() {
 
       // Save partner name
       setPartnerName(result.partner?.name || form.name);
-
-      // Store credentials in memory (not localStorage)
-      if (result.credentials) {
-        setPartnerCreds({
-          apiKey: result.credentials.apiKey,
-          apiSecret: result.credentials.apiSecret
-        });
-      }
 
       setLoading(false);
     } catch (err) {

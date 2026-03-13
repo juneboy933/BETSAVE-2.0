@@ -1,5 +1,6 @@
 import Event from '../../database/models/event.model.js';
 import Ledger from "../../database/models/ledger.model.js";
+import PaymentTransaction from "../../database/models/paymentTransaction.model.js";
 import PartnerNotification from "../../database/models/partnerNotification.model.js";
 import PartnerUser from "../../database/models/partnerUser.model.js";
 
@@ -366,6 +367,117 @@ export const getPartnerUsers = async (req, res) => {
             limit,
             total,
             users: partnerUsers
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const getPartnerUserDemoState = async (req, res) => {
+    try {
+        const partnerId = req.partner.id;
+        const partnerName = req.partner.name;
+        const operatingMode =
+            String(req.partner?.operatingMode || "demo").trim().toLowerCase() === "live"
+                ? "live"
+                : "demo";
+        const requestedUserId = String(req.query.userId || "").trim();
+        const requestedPhone = String(req.query.phone || "").trim();
+
+        if (!requestedUserId && !requestedPhone) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "userId or phone is required"
+            });
+        }
+
+        const partnerUserQuery = { partnerId };
+        if (requestedUserId) {
+            partnerUserQuery.userId = requestedUserId;
+        } else {
+            partnerUserQuery.phoneNumber = requestedPhone;
+        }
+
+        const partnerUser = await PartnerUser.findOne(partnerUserQuery)
+            .sort({ createdAt: -1 })
+            .lean();
+
+        if (!partnerUser) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "Partner-linked user not found"
+            });
+        }
+
+        const eventReferencePrefix = new RegExp(`^EVENT::${escapeRegex(partnerName)}::${operatingMode}::`);
+        const [events, paymentTransactions, attributedWalletBalanceAgg] = await Promise.all([
+            Event.find({
+                userId: partnerUser.userId,
+                partnerName,
+                operatingMode
+            })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .lean(),
+            PaymentTransaction.find({
+                userId: partnerUser.userId,
+                externalRef: eventReferencePrefix
+            })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .lean(),
+            Ledger.aggregate([
+                {
+                    $match: {
+                        userId: partnerUser.userId,
+                        account: "USER_WALLET_LIABILITY",
+                        reference: eventReferencePrefix
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: "$amount" }
+                    }
+                }
+            ])
+        ]);
+
+        const eventIds = events.map((event) => event.eventId);
+        const savingsTransactions = eventIds.length
+            ? await Ledger.find({
+                userId: partnerUser.userId,
+                account: "USER_SAVINGS",
+                eventId: { $in: eventIds }
+            })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .lean()
+            : [];
+
+        const totalSaved = savingsTransactions.reduce((sum, row) => sum + clampNonNegative(row.amount), 0);
+        const processedEvents = events.filter((event) => event.status === "PROCESSED");
+        const totalProcessedEventAmount = processedEvents.reduce(
+            (sum, event) => sum + clampNonNegative(event.amount),
+            0
+        );
+
+        return res.json({
+            status: "SUCCESS",
+            operatingMode,
+            partnerUser,
+            summary: {
+                partnerAttributedWalletBalance: clampNonNegative(attributedWalletBalanceAgg[0]?.total),
+                totalSaved,
+                processedEventCount: processedEvents.length,
+                totalProcessedEventAmount
+            },
+            events,
+            savingsTransactions,
+            paymentTransactions
         });
     } catch (error) {
         return res.status(500).json({

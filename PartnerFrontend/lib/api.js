@@ -1,9 +1,13 @@
 "use client";
 
 const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
+const PARTNER_SESSION_FLAG = "partner_session_active";
+const PARTNER_RATE_LIMIT_BACKOFF_MS = 30000;
+let partnerDashboardRateLimitedUntil = 0;
 
 const normalizeApiBase = (value) => (value || DEFAULT_API).trim().replace(/\/+$/, "");
 const canUseStorage = () => typeof window !== "undefined" && typeof localStorage !== "undefined";
+const canUseSessionStorage = () => typeof window !== "undefined" && typeof sessionStorage !== "undefined";
 
 function buildRequestUrl(path) {
   const base = normalizeApiBase(getApiBase());
@@ -18,39 +22,52 @@ export const setApiBase = (value) => {
   localStorage.setItem("partner_api_base", normalizeApiBase(value));
 };
 
-// credentials/token are kept in memory only; do not persist to avoid theft via XSS
-let partnerApiKey = "";
-let partnerApiSecret = "";
 let partnerToken = "";
-
-export const getPartnerCreds = () => ({ apiKey: partnerApiKey, apiSecret: partnerApiSecret });
-export const setPartnerCreds = ({ apiKey, apiSecret }) => {
-  partnerApiKey = String(apiKey || "").trim();
-  partnerApiSecret = String(apiSecret || "").trim();
-};
 
 export const setPartnerToken = (token) => {
   partnerToken = String(token || "").trim();
+  markPartnerSessionActive();
+};
+export const markPartnerSessionActive = () => {
+  if (!canUseSessionStorage()) return;
+  sessionStorage.setItem(PARTNER_SESSION_FLAG, "1");
 };
 export const getPartnerToken = () => partnerToken;
+export const hasPartnerSession = () =>
+  Boolean(getPartnerToken()) || (canUseSessionStorage() && sessionStorage.getItem(PARTNER_SESSION_FLAG) === "1");
+
+const isPartnerDashboardRequest = (path) => {
+  const normalizedPath = String(path || "");
+  return normalizedPath.startsWith("/api/v1/dashboard/partner/") || normalizedPath.startsWith("/api/v1/partners/mode");
+};
+
+const sanitizePartnerHeaders = (headers) => {
+  const normalizedHeaders = new Headers(headers || {});
+  normalizedHeaders.delete("Authorization");
+  return normalizedHeaders;
+};
 
 // wrapper for dashboard requests using bearer token
 export async function partnerRequest(path, options = {}) {
-  const headers = Object.assign({}, options.headers || {});
-  if (partnerToken) {
-    headers.Authorization = `Bearer ${partnerToken}`;
+  const isDashboardRequest = isPartnerDashboardRequest(path);
+
+  if (isDashboardRequest && partnerDashboardRateLimitedUntil > Date.now()) {
+    const retryInSeconds = Math.max(1, Math.ceil((partnerDashboardRateLimitedUntil - Date.now()) / 1000));
+    const error = new Error(`Rate limit active. Retry in ${retryInSeconds}s`);
+    error.status = 429;
+    throw error;
   }
-  const response = await fetch(buildRequestUrl(path), { ...options, headers });
-  return parseResponse(response);
+
+  const response = await fetch(buildRequestUrl(path), {
+    credentials: "include",
+    ...options,
+    headers: sanitizePartnerHeaders(options.headers)
+  });
+  return parseResponse(response, { isDashboardRequest, response });
 }
 
 export const getPartnerName = () => (canUseStorage() ? localStorage.getItem("partner_name") || "" : "");
 export const getPartnerOperatingMode = () => (canUseStorage() ? localStorage.getItem("partner_operating_mode") || "demo" : "demo");
-
-export const hasPartnerCreds = () => {
-  const { apiKey, apiSecret } = getPartnerCreds();
-  return Boolean(apiKey && apiSecret);
-};
 
 export const setPartnerName = (name) => {
   if (!canUseStorage()) return;
@@ -69,67 +86,40 @@ export const setPartnerOperatingMode = (mode) => {
 };
 
 export const clearPartnerCreds = () => {
-  partnerApiKey = "";
-  partnerApiSecret = "";
+  partnerToken = "";
+  if (canUseSessionStorage()) {
+    sessionStorage.removeItem(PARTNER_SESSION_FLAG);
+  }
   if (!canUseStorage()) return;
   localStorage.removeItem("partner_name");
   localStorage.removeItem("partner_operating_mode");
 };
 
-async function parseResponse(response) {
+async function parseResponse(response, context = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 429 && context.isDashboardRequest) {
+      const retryAfterSeconds = Number(response.headers.get("retry-after")) || (PARTNER_RATE_LIMIT_BACKOFF_MS / 1000);
+      partnerDashboardRateLimitedUntil = Date.now() + (retryAfterSeconds * 1000);
+    }
     const error = new Error(data.reason || data.error || "Request failed");
     error.code = data.code || null;
     error.details = data.details || null;
     error.providerResponse = data.providerResponse || null;
+    error.status = response.status;
     throw error;
+  }
+  if (context.isDashboardRequest) {
+    partnerDashboardRateLimitedUntil = 0;
   }
   return data;
 }
 
 export async function request(path, options = {}) {
-  const response = await fetch(buildRequestUrl(path), options);
-  return parseResponse(response);
-}
-
-function toHex(buffer) {
-  return [...new Uint8Array(buffer)].map((x) => x.toString(16).padStart(2, "0")).join("");
-}
-
-async function hmacSha256(secret, payload) {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
-  return toHex(sig);
-}
-
-export async function signedRequest({ method, path, body = {}, apiKey, apiSecret }) {
-  const methodUpper = method.toUpperCase();
-  const timestamp = Date.now().toString();
-  const url = new URL(buildRequestUrl(path));
-  const canonicalPath = `${url.pathname}${url.search}`;
-  const payloadBody = methodUpper === "GET" ? {} : body || {};
-  const payload = `${timestamp}${methodUpper}${canonicalPath}${JSON.stringify(payloadBody)}`;
-  const signature = await hmacSha256(apiSecret, payload);
-
-  const response = await fetch(url.toString(), {
-    method: methodUpper,
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "x-timestamp": timestamp,
-      "x-signature": signature
-    },
-    body: methodUpper === "GET" ? undefined : JSON.stringify(payloadBody)
+  const response = await fetch(buildRequestUrl(path), {
+    credentials: "include",
+    ...options
   });
-
   return parseResponse(response);
 }
 
@@ -154,6 +144,9 @@ export async function registerPartnerAuth({ name, email, password, webhookUrl })
   // Store partner info
   if (result.partner?.name) {
     setPartnerName(result.partner.name);
+  }
+  if (result.partner?.operatingMode) {
+    setPartnerOperatingMode(result.partner.operatingMode);
   }
 
   // Return credentials object for display
@@ -185,6 +178,9 @@ export async function loginPartnerAuth({ email, password }) {
   // Store partner info if returned
   if (result.partner?.name) {
     setPartnerName(result.partner.name);
+  }
+  if (result.partner?.operatingMode) {
+    setPartnerOperatingMode(result.partner.operatingMode);
   }
 
   return result;

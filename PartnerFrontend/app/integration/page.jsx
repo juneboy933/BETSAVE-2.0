@@ -1,67 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getPartnerCreds, request, setPartnerCreds, setPartnerToken } from "../../lib/api";
-
 export default function IntegrationPage() {
-  const [form, setForm] = useState({ name: "", webhookUrl: "" });
-  const [loginForm, setLoginForm] = useState({ apiKey: "", apiSecret: "" });
-  const [creds, setCreds] = useState({ apiKey: "", apiSecret: "" });
-  const [token, setToken] = useState("");
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
-
-  useEffect(() => setCreds(getPartnerCreds()), []);
-
-  const createPartner = async () => {
-    try {
-      setErr("");
-      const result = await request("/api/v1/partners/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
-      });
-      const next = { apiKey: result.partner.apiKey, apiSecret: result.partner.apiSecret };
-      setCreds(next);
-      setPartnerCreds(next);
-      if (result.token) {
-        setToken(result.token);
-        setPartnerToken(result.token);
-      }
-      setMsg("Partner created. Session token issued.");
-    } catch (error) {
-      setErr(error.message);
-    }
-  };
-
-  const loginPartner = async () => {
-    try {
-      setErr("");
-      const result = await request("/api/v1/partners/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(loginForm)
-      });
-      const next = { apiKey: loginForm.apiKey, apiSecret: loginForm.apiSecret };
-      setCreds(next);
-      setPartnerCreds(next);
-      if (result.token) {
-        setToken(result.token);
-        setPartnerToken(result.token);
-      }
-      setMsg(`Logged in as ${result.partner.name}. Session token issued.`);
-    } catch (error) {
-      setErr(error.message);
-    }
-  };
-
   return (
     <section className="space-y-4">
       <article className="card">
         <h2 className="mb-2 text-lg font-bold">Integration Guide</h2>
         <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
-          <li>Create your partner profile.</li>
-          <li>Existing partners can login with existing API credentials.</li>
+          <li>Register the partner through the email/password flow.</li>
+          <li>Capture the API key and secret shown once after registration.</li>
           <li>Store API credentials on your backend only.</li>
           <li>Register users automatically by phone from your platform.</li>
           <li>Send signed bet events on every bet placed.</li>
@@ -70,47 +16,28 @@ export default function IntegrationPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <article className="card">
-          <h3 className="mb-3 text-base font-bold">Existing Partner Login</h3>
-          <label className="label">API Key</label>
-          <input
-            className="input"
-            value={loginForm.apiKey}
-            onChange={(e) => setLoginForm({ ...loginForm, apiKey: e.target.value })}
-          />
-          <label className="label">API Secret</label>
-          <input
-            className="input"
-            value={loginForm.apiSecret}
-            onChange={(e) => setLoginForm({ ...loginForm, apiSecret: e.target.value })}
-          />
-          <button className="btn-secondary mt-2" onClick={loginPartner}>
-            Login Partner
-          </button>
+          <h3 className="mb-3 text-base font-bold">Credential Handling</h3>
+          <p className="text-sm text-slate-600">
+            The partner portal no longer keeps API secrets in shared browser state. Registration shows them once, and
+            after that your backend is the only supported place to retain them.
+          </p>
+          <div className="mt-4 rounded-xl bg-slate-100 p-3 font-mono text-xs">
+            <p className="mb-2 font-semibold text-slate-700">Dashboard Access</p>
+            <p className="mb-3 break-all rounded bg-white px-2 py-1 text-slate-900">Session cookie only</p>
+            <p className="mb-2 font-semibold text-slate-700">Integration Signing</p>
+            <p className="break-all rounded bg-white px-2 py-1 text-slate-900">Server-to-server only</p>
+          </div>
         </article>
 
         <article className="card">
-          <h3 className="mb-3 text-base font-bold">Create Partner</h3>
-          <label className="label">Partner Name</label>
-          <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <label className="label">Webhook URL</label>
-          <input
-            className="input"
-            value={form.webhookUrl}
-            onChange={(e) => setForm({ ...form, webhookUrl: e.target.value })}
-          />
-          <button className="btn mt-2" onClick={createPartner}>
-            Create Partner
-          </button>
-          {msg && <p className="mt-2 text-sm font-semibold text-emerald-700">{msg}</p>}
-          {err && <p className="mt-2 text-sm font-semibold text-red-700">{err}</p>}
-        </article>
-
-        <article className="card">
-          <h3 className="mb-3 text-base font-bold">Session Token</h3>
-          <p className="text-sm text-slate-700 break-words">{token || "(not logged in)"}</p>
-          <p className="text-xs text-slate-500 mt-1">
-            Copy this token to your backend and use it to call the dashboard APIs. Do
-            <strong>not</strong> expose API secret in the browser.
+          <h3 className="mb-3 text-base font-bold">What Changed</h3>
+          <p className="text-sm leading-6 text-slate-600">
+            Legacy browser endpoints that created partners or re-logged them with API secrets were removed from the
+            normal UI path. That flow was weak and encouraged secret handling in the browser.
+          </p>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Use dashboard email/password auth for operator access. Use API key plus API secret only from your backend
+            when signing integration requests.
           </p>
         </article>
       </div>

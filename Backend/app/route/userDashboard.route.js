@@ -4,12 +4,15 @@ import {
     getUserEvents,
     getUserTransactions
 } from "../controller/userDashboard.controller.js";
-import { verifyUserToken } from "../middleware/userAuth.middleware.js";
+import {
+    requireAuthenticatedUserOwnership,
+    verifyUserToken
+} from "../middleware/userAuth.middleware.js";
 
 const router = express.Router();
 
-router.get("/:userId", verifyUserToken, getUserDashboardSummary);
-router.get("/:userId/events", verifyUserToken, getUserEvents);
-router.get("/:userId/transactions", verifyUserToken, getUserTransactions);
+router.get("/:userId", verifyUserToken, requireAuthenticatedUserOwnership(), getUserDashboardSummary);
+router.get("/:userId/events", verifyUserToken, requireAuthenticatedUserOwnership(), getUserEvents);
+router.get("/:userId/transactions", verifyUserToken, requireAuthenticatedUserOwnership(), getUserTransactions);
 
 export default router;

@@ -52,7 +52,8 @@ export const confirmDeposit = async ({
     providerTransactionId = null,
     externalRef = null,
     rawCallback = null,
-    applyWalletCredit = true
+    applyWalletCredit = true,
+    recordLiabilityLedger = true
 }) => {
     const paymentTransaction = await PaymentTransaction.findById(paymentTransactionId);
 
@@ -68,7 +69,7 @@ export const confirmDeposit = async ({
         return paymentTransaction;
     }
 
-    if (applyWalletCredit) {
+    if (recordLiabilityLedger) {
         const amount = validateAmount(paymentTransaction.amount);
         const eventId = buildPaymentEventId(paymentTransaction._id);
 
@@ -88,7 +89,7 @@ export const confirmDeposit = async ({
                     amount: amount
                 }
             ],
-            walletDelta: amount,
+            walletDelta: applyWalletCredit ? amount : 0,
             idempotencyQuery: {
                 eventId,
                 userId: paymentTransaction.userId,

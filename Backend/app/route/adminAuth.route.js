@@ -1,8 +1,10 @@
 import express from "express";
 import {
     createAdminInvitation,
+    getAdminSession,
     listAdminInvitations,
     loginAdmin,
+    logoutAdmin,
     registerAdminWithInvitation,
     revokeAdminInvitation
 } from "../controller/adminAuth.controller.js";
@@ -13,6 +15,8 @@ const router = express.Router();
 // Public routes (no protection)
 router.post("/login", loginAdmin);
 router.post("/register-with-invitation", registerAdminWithInvitation);
+router.get("/session", verifyAdmin, getAdminSession);
+router.post("/logout", verifyAdmin, logoutAdmin);
 
 // Admin-only routes (require valid admin token)
 router.post("/invitations", verifyAdmin, createAdminInvitation);

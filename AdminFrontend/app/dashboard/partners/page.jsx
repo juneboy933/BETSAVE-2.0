@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAdminToken, request } from "../../../lib/api";
+import { request } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function AdminDashboardPartners() {
   const router = useRouter();
@@ -40,9 +41,7 @@ export default function AdminDashboardPartners() {
   const refresh = useCallback(async () => {
     try {
       setError("");
-      const data = await request("/api/v1/dashboard/admin/partners?page=1&limit=100", {
-        headers: { "x-admin-token": getAdminToken() }
-      });
+      const data = await request("/api/v1/dashboard/admin/partners?page=1&limit=100");
       setPartners(data.partners || []);
     } catch (err) {
       setError(err.message);
@@ -50,9 +49,7 @@ export default function AdminDashboardPartners() {
   }, []);
 
   useEffect(() => {
-    refresh();
-    const intervalId = setInterval(refresh, 10000);
-    return () => clearInterval(intervalId);
+    return attachVisiblePolling(refresh);
   }, [refresh]);
 
   useEffect(() => {

@@ -1,17 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getApiBase, getPartnerCreds, getPartnerName, getPartnerOperatingMode, request, signedRequest } from "../../../lib/api";
+import {
+  getPartnerOperatingMode,
+  hasPartnerSession,
+  partnerRequest
+} from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 const toPositive = (value) => Math.max(0, Number(value) || 0);
 const toAmount = (value) => Number(value) || 0;
 const normalizePhone = (value) => String(value || "").trim();
 const phoneDigits = (value) => String(value || "").replace(/\D/g, "");
-
-const buildIdempotencyKey = (prefix) => {
-  const token = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-  return `${prefix}-${token}`;
-};
 
 const statusClass = (status) => {
   const normalized = String(status || "").toUpperCase();
@@ -34,9 +34,6 @@ export default function PartnerDashboardUserDemo() {
   const [paymentTransactions, setPaymentTransactions] = useState([]);
   const [partnerUser, setPartnerUser] = useState(null);
 
-  const [depositAmount, setDepositAmount] = useState("");
-  const [withdrawalAmount, setWithdrawalAmount] = useState("");
-
   const [otpModalOpen, setOtpModalOpen] = useState(false);
   const [otpCode, setOtpCode] = useState("");
   const [otpPhone, setOtpPhone] = useState("");
@@ -48,25 +45,8 @@ export default function PartnerDashboardUserDemo() {
   const [error, setError] = useState("");
   const [operatingMode, setOperatingMode] = useState("demo");
 
-  const partnerCreds = useMemo(() => getPartnerCreds(), []);
-  const hasPartnerCreds = useMemo(() => Boolean(partnerCreds.apiKey && partnerCreds.apiSecret), [partnerCreds]);
-  const activePartnerName = useMemo(() => {
-    const stored = String(getPartnerName() || "").trim();
-    if (stored) return stored;
-    const inferred = String(partnerCreds.apiKey || "").split("_")[0].replace(/_/g, " ").trim();
-    return inferred || "";
-  }, [partnerCreds.apiKey]);
-
   const normalizedUserPhone = useMemo(() => normalizePhone(userPhone), [userPhone]);
-  const isReady = useMemo(() => normalizedUserPhone && (userId.trim() || hasPartnerCreds), [normalizedUserPhone, userId, hasPartnerCreds]);
-
-  const userHeaders = useMemo(
-    () => ({
-      "Content-Type": "application/json",
-      "x-user-phone": normalizedUserPhone
-    }),
-    [normalizedUserPhone]
-  );
+  const isReady = useMemo(() => Boolean(normalizedUserPhone && (userId.trim() || hasPartnerSession())), [normalizedUserPhone, userId]);
 
   const depositRows = useMemo(
     () => paymentTransactions.filter((tx) => String(tx.type || "").toUpperCase() === "DEPOSIT"),
@@ -117,18 +97,12 @@ export default function PartnerDashboardUserDemo() {
   };
 
   const resolveUserIdFromPartnerPhone = async () => {
-    if (!hasPartnerCreds) return null;
+    if (!hasPartnerSession()) return null;
     if (!normalizedUserPhone) return null;
 
     try {
       setIsResolvingUser(true);
-      const data = await signedRequest({
-        method: "GET",
-        path: "/api/v1/dashboard/partner/users?page=1&limit=500",
-        body: {},
-        apiKey: partnerCreds.apiKey,
-        apiSecret: partnerCreds.apiSecret
-      });
+      const data = await partnerRequest("/api/v1/dashboard/partner/users?page=1&limit=500");
 
       const phoneNeedle = phoneDigits(normalizedUserPhone);
       const match = (data.users || []).find((item) => {
@@ -152,15 +126,9 @@ export default function PartnerDashboardUserDemo() {
   };
 
   const loadPartnerUserState = async () => {
-    if (!hasPartnerCreds || !normalizedUserPhone) return;
+    if (!hasPartnerSession() || !normalizedUserPhone) return;
     try {
-      const data = await signedRequest({
-        method: "GET",
-        path: "/api/v1/dashboard/partner/users?page=1&limit=100",
-        body: {},
-        apiKey: partnerCreds.apiKey,
-        apiSecret: partnerCreds.apiSecret
-      });
+      const data = await partnerRequest("/api/v1/dashboard/partner/users?page=1&limit=100");
       const phoneNeedle = phoneDigits(normalizedUserPhone);
       const match = (data.users || []).find((item) => {
         const candidatePhone = normalizePhone(item?.phoneNumber);
@@ -191,27 +159,19 @@ export default function PartnerDashboardUserDemo() {
         return;
       }
 
-      const partnerQuery = activePartnerName ? `?partnerName=${encodeURIComponent(activePartnerName)}` : "";
-      const [dashboard, eventRows, savingsRows] = await Promise.all([
-        request(`/api/v1/dashboard/user/${resolvedUserId}${partnerQuery}`, { headers: userHeaders }),
-        request(`/api/v1/dashboard/user/${resolvedUserId}/events?page=1&limit=20`, { headers: userHeaders }),
-        request(`/api/v1/dashboard/user/${resolvedUserId}/transactions?page=1&limit=20`, { headers: userHeaders })
-      ]);
-
-      let paymentRows = { transactions: [] };
-      try {
-        paymentRows = await request(`/api/v1/payments/${resolvedUserId}/transactions?page=1&limit=20`, {
-          headers: userHeaders
-        });
-      } catch {
-        paymentRows = { transactions: [] };
+      const query = new URLSearchParams();
+      query.set("userId", resolvedUserId);
+      if (normalizedUserPhone) {
+        query.set("phone", normalizedUserPhone);
       }
 
-      setSummary(dashboard);
-      setEvents(eventRows.events || []);
-      setSavingsTransactions(savingsRows.transactions || []);
-      setPaymentTransactions(paymentRows.transactions || []);
-      await loadPartnerUserState();
+      const data = await partnerRequest(`/api/v1/dashboard/partner/user-demo?${query.toString()}`);
+
+      setSummary(data.summary || null);
+      setEvents(data.events || []);
+      setSavingsTransactions(data.savingsTransactions || []);
+      setPaymentTransactions(data.paymentTransactions || []);
+      setPartnerUser(data.partnerUser || null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -222,15 +182,19 @@ export default function PartnerDashboardUserDemo() {
   useEffect(() => {
     setOperatingMode(getPartnerOperatingMode());
     if (!isReady) return;
-    loadUserData();
-    const intervalId = setInterval(loadUserData, 10000);
-    return () => clearInterval(intervalId);
+    return attachVisiblePolling(loadUserData);
   }, [isReady, userId, userPhone]);
 
   useEffect(() => {
-    const intervalId = setInterval(() => setOperatingMode(getPartnerOperatingMode()), 2000);
-    return () => clearInterval(intervalId);
-  }, []);
+    const onPartnerModeChanged = () => {
+      setOperatingMode(getPartnerOperatingMode());
+      if (isReady) {
+        loadUserData();
+      }
+    };
+    window.addEventListener("partner-mode-changed", onPartnerModeChanged);
+    return () => window.removeEventListener("partner-mode-changed", onPartnerModeChanged);
+  }, [isReady, userId, userPhone]);
 
   const syncAutoSavingsPreference = async (autoSavingsEnabled) => {
     if (operatingMode !== "demo") {
@@ -241,23 +205,21 @@ export default function PartnerDashboardUserDemo() {
       setError("Enter user phone number first.");
       return;
     }
-    if (!hasPartnerCreds) {
-      setError("Missing partner credentials. Login as partner first.");
+    if (!hasPartnerSession()) {
+      setError("Partner session is missing. Login again.");
       return;
     }
 
     try {
       setIsSubmitting(true);
       clearNotices();
-      const result = await signedRequest({
+      const result = await partnerRequest("/api/v1/partners/users/register", {
         method: "POST",
-        path: "/api/v1/partners/users/register",
-        body: {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           phone: normalizedUserPhone,
           autoSavingsEnabled
-        },
-        apiKey: partnerCreds.apiKey,
-        apiSecret: partnerCreds.apiSecret
+        })
       });
 
       if (result.requiresOtp) {
@@ -290,104 +252,27 @@ export default function PartnerDashboardUserDemo() {
       setError("Provide OTP phone and code.");
       return;
     }
-    if (!hasPartnerCreds) {
-      setError("Missing partner credentials. Login as partner first.");
+    if (!hasPartnerSession()) {
+      setError("Partner session is missing. Login again.");
       return;
     }
 
     try {
       setIsSubmitting(true);
       clearNotices();
-      await signedRequest({
+      await partnerRequest("/api/v1/partners/users/verify-otp", {
         method: "POST",
-        path: "/api/v1/partners/users/verify-otp",
-        body: {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           phone: otpPhone.trim(),
           otp: otpCode.trim()
-        },
-        apiKey: partnerCreds.apiKey,
-        apiSecret: partnerCreds.apiSecret
+        })
       });
 
       setOtpModalOpen(false);
       setOtpCode("");
       setMessage("OTP verified successfully.");
       await loadPartnerUserState();
-      await loadUserData();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const initiateDeposit = async () => {
-    if (operatingMode !== "demo") {
-      setError("User demo controls are disabled in live mode.");
-      return;
-    }
-    if (!isReady) return;
-    try {
-      const amount = Number(depositAmount);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        setError("Enter a valid deposit amount.");
-        return;
-      }
-
-      setIsSubmitting(true);
-      clearNotices();
-
-      await request(`/api/v1/payments/${userId}/deposits`, {
-        method: "POST",
-        headers: userHeaders,
-        body: JSON.stringify({
-          phone: normalizedUserPhone,
-          amount,
-          channel: "STK",
-          idempotencyKey: buildIdempotencyKey("dep"),
-          externalRef: `USER_DEMO_DEP_${Date.now()}`
-        })
-      });
-
-      setMessage("STK deposit initiated. Await callback settlement.");
-      setDepositAmount("");
-      await loadUserData();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const initiateWithdrawal = async () => {
-    if (operatingMode !== "demo") {
-      setError("User demo controls are disabled in live mode.");
-      return;
-    }
-    if (!isReady) return;
-    try {
-      const amount = Number(withdrawalAmount);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        setError("Enter a valid withdrawal amount.");
-        return;
-      }
-
-      setIsSubmitting(true);
-      clearNotices();
-
-      await request(`/api/v1/payments/${userId}/withdrawals`, {
-        method: "POST",
-        headers: userHeaders,
-        body: JSON.stringify({
-          phone: normalizedUserPhone,
-          amount,
-          idempotencyKey: buildIdempotencyKey("wd"),
-          notes: "User demo withdrawal"
-        })
-      });
-
-      setMessage("Withdrawal request submitted.");
-      setWithdrawalAmount("");
       await loadUserData();
     } catch (err) {
       setError(err.message);
@@ -414,12 +299,9 @@ export default function PartnerDashboardUserDemo() {
       <article className="card space-y-3">
         <h2 className="text-lg font-bold">User Wallet Demo Dashboard</h2>
         <section className="callout">
-          Demo only: this mimics how partners can build user wallet UX on top of Betsave APIs. In live mode, user entry
-          points should come from partner systems, while Betsave handles settlement and ledgering.
+          Demo only: this page now shows partner-scoped demo activity through secure partner endpoints. Real money
+          movement walkthroughs should be triggered from the Event Stream so they stay mode-scoped and auditable.
         </section>
-        <p className="text-xs text-slate-500">
-          API Base: <span className="mono">{getApiBase()}</span>
-        </p>
         <div className="grid gap-2 md:grid-cols-2">
           <input className="input" placeholder="User ID" value={userId} onChange={(e) => setUserId(e.target.value)} />
           <input className="input" placeholder="User Phone (+254...)" value={userPhone} onChange={(e) => setUserPhone(e.target.value)} />
@@ -431,7 +313,7 @@ export default function PartnerDashboardUserDemo() {
           <button
             className="btn-secondary"
             onClick={resolveUserIdFromPartnerPhone}
-            disabled={!normalizedUserPhone || !hasPartnerCreds || isResolvingUser}
+            disabled={!normalizedUserPhone || !hasPartnerSession() || isResolvingUser}
           >
             {isResolvingUser ? "Resolving..." : "Resolve User ID By Phone"}
           </button>
@@ -524,35 +406,12 @@ export default function PartnerDashboardUserDemo() {
       </article>
 
       <article className="card space-y-3">
-        <h3 className="text-base font-bold">Demo Payment Actions</h3>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-slate-700">STK Deposit</p>
-            <input
-              className="input"
-              type="number"
-              placeholder="Amount"
-              value={depositAmount}
-              onChange={(e) => setDepositAmount(e.target.value)}
-            />
-            <button className="btn w-full" disabled={!isReady || isSubmitting} onClick={initiateDeposit}>
-              Initiate STK Deposit
-            </button>
-          </div>
-          <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-slate-700">Withdrawal</p>
-            <input
-              className="input"
-              type="number"
-              placeholder="Amount"
-              value={withdrawalAmount}
-              onChange={(e) => setWithdrawalAmount(e.target.value)}
-            />
-            <button className="btn-secondary w-full" disabled={!isReady || isSubmitting} onClick={initiateWithdrawal}>
-              Request Withdrawal
-            </button>
-          </div>
-        </div>
+        <h3 className="text-base font-bold">Money Movement Demo Policy</h3>
+        <section className="callout">
+          Direct deposit and withdrawal buttons were removed from this page because they relied on the wrong auth model
+          and touched real payment routes from a demo surface. Use the Partner Event Stream in demo mode for STK-driven
+          walkthroughs and ledger visibility.
+        </section>
       </article>
 
       <article className="card">

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AnimatedNumber from "../../../components/AnimatedNumber";
-import { getPartnerCreds, signedRequest } from "../../../lib/api";
+import { partnerRequest } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function PartnerDashboardAnalytics() {
   const [summary, setSummary] = useState([]);
@@ -18,25 +19,12 @@ export default function PartnerDashboardAnalytics() {
     Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
   const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setError("");
-      const creds = getPartnerCreds();
       const [a, b] = await Promise.all([
-        signedRequest({
-          method: "GET",
-          path: "/api/v1/dashboard/partner/analytics",
-          body: {},
-          apiKey: creds.apiKey,
-          apiSecret: creds.apiSecret
-        }),
-        signedRequest({
-          method: "GET",
-          path: "/api/v1/dashboard/partner/savings-behavior",
-          body: {},
-          apiKey: creds.apiKey,
-          apiSecret: creds.apiSecret
-        })
+        partnerRequest("/api/v1/dashboard/partner/analytics"),
+        partnerRequest("/api/v1/dashboard/partner/savings-behavior")
       ]);
       setSummary(a.stat || []);
       setTotalWalletBalance(toPositiveNumber(a.totalWalletBalance));
@@ -46,13 +34,19 @@ export default function PartnerDashboardAnalytics() {
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    load();
-    const intervalId = setInterval(load, 10000);
-    return () => clearInterval(intervalId);
-  }, []);
+    return attachVisiblePolling(load);
+  }, [load]);
+
+  useEffect(() => {
+    const onPartnerModeChanged = () => {
+      load();
+    };
+    window.addEventListener("partner-mode-changed", onPartnerModeChanged);
+    return () => window.removeEventListener("partner-mode-changed", onPartnerModeChanged);
+  }, [load]);
 
   useEffect(() => {
     setCurrentPage(1);

@@ -1,36 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAdminToken, getApiBase, request, setAdminToken, setApiBase } from "../../lib/api";
+import Link from "next/link";
+import { getApiBase, hasAdminToken, request, setAdminToken, setApiBase } from "../../lib/api";
 
 export default function AccessPage() {
   const [apiBase, setApiBaseInput] = useState("");
-  const [registerForm, setRegisterForm] = useState({ name: "", email: "", password: "" });
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
-  const [token, setToken] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
   useEffect(() => {
     setApiBaseInput(getApiBase());
-    setToken(getAdminToken());
   }, []);
-
-  const doRegister = async () => {
-    try {
-      setErr("");
-      const result = await request("/api/v1/admin/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(registerForm)
-      });
-      setAdminToken(result.token);
-      setToken(result.token);
-      setMsg("Admin registered and token saved.");
-    } catch (error) {
-      setErr(error.message);
-    }
-  };
 
   const doLogin = async () => {
     try {
@@ -41,8 +23,7 @@ export default function AccessPage() {
         body: JSON.stringify(loginForm)
       });
       setAdminToken(result.token);
-      setToken(result.token);
-      setMsg("Admin logged in and token saved.");
+      setMsg("Admin session established.");
     } catch (error) {
       setErr(error.message);
     }
@@ -61,16 +42,14 @@ export default function AccessPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <article className="card">
-          <h3 className="mb-3 text-base font-bold">Register Admin</h3>
-          <label className="label">Name</label>
-          <input className="input" value={registerForm.name} onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })} />
-          <label className="label">Email</label>
-          <input className="input" value={registerForm.email} onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })} />
-          <label className="label">Password</label>
-          <input className="input" type="password" value={registerForm.password} onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })} />
-          <button className="btn mt-2" onClick={doRegister}>
-            Register
-          </button>
+          <h3 className="mb-3 text-base font-bold">Admin Onboarding</h3>
+          <p className="text-sm leading-6 text-slate-600">
+            Admin registration is invitation-only. An existing admin must log in, open Dashboard Access, create an
+            invitation, then send the one-time code to the invited admin.
+          </p>
+          <Link href="/register" className="btn mt-4">
+            Open Invitation Registration
+          </Link>
         </article>
 
         <article className="card">
@@ -86,8 +65,8 @@ export default function AccessPage() {
       </div>
 
       <article className="card">
-        <h3 className="mb-2 text-base font-bold">Saved Admin Token</h3>
-        <p className="break-all text-sm text-slate-700">{token || "No token saved yet."}</p>
+        <h3 className="mb-2 text-base font-bold">Session Status</h3>
+        <p className="break-all text-sm text-slate-700">{hasAdminToken() ? "Admin session active." : "No admin session active."}</p>
       </article>
       {msg && <p className="text-sm font-semibold text-emerald-700">{msg}</p>}
       {err && <p className="text-sm font-semibold text-red-700">{err}</p>}

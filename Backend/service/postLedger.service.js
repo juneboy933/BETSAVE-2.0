@@ -1,10 +1,14 @@
-import mongoose from "mongoose";
 import Ledger from "../database/models/ledger.model.js";
 import Wallet from "../database/models/wallet.model.js";
+import { runInTransaction } from "./databaseSession.service.js";
 
 const EPSILON = 0.000001;
 
 const sumAmounts = (entries) => entries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+const isDuplicateLedgerError = (error) =>
+    error?.code === 11000 && /idempotencyKey/i.test(String(error?.message || ""));
+const buildLedgerIdempotencyKey = ({ eventId, userId, account }) =>
+    `${String(eventId)}::${String(userId)}::${String(account)}`;
 
 export const postLedger = async ({
     userId,
@@ -34,79 +38,99 @@ export const postLedger = async ({
         throw new Error("Ledger imbalance detected");
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
     try {
-        if (idempotencyQuery && typeof idempotencyQuery === "object") {
-            const existingEntry = await Ledger.findOne(idempotencyQuery)
-                .session(session)
-                .select("_id");
+        return await runInTransaction(async (session) => {
+            if (idempotencyQuery && typeof idempotencyQuery === "object") {
+                let existingEntryQuery = Ledger.findOne(idempotencyQuery).select("_id");
+                if (session) {
+                    existingEntryQuery = existingEntryQuery.session(session);
+                }
 
-            if (existingEntry) {
-                const existingWallet = await Wallet.findOne({ userId }).session(session);
-                await session.commitTransaction();
-                return {
-                    wallet: existingWallet,
-                    ledgerDocs: [],
-                    wasDuplicate: true
-                };
+                const existingEntry = await existingEntryQuery;
+
+                if (existingEntry) {
+                    let existingWalletQuery = Wallet.findOne({ userId });
+                    if (session) {
+                        existingWalletQuery = existingWalletQuery.session(session);
+                    }
+
+                    const existingWallet = await existingWalletQuery;
+                    return {
+                        wallet: existingWallet,
+                        ledgerDocs: [],
+                        wasDuplicate: true
+                    };
+                }
             }
-        }
 
-        const currentWallet = await Wallet.findOne({ userId }).session(session).select("balance");
-        const currentBalance = Number(currentWallet?.balance || 0);
-        if (enforceNonNegativeBalance && currentBalance + normalizedWalletDelta < -EPSILON) {
-            throw new Error("Insufficient wallet balance");
-        }
-
-        const docsToInsert = entries.map((entry) => ({
-            eventId: entry.eventId || eventId,
-            userId,
-            account: entry.account,
-            amount: Number(entry.amount),
-            currency: entry.currency || "KES",
-            reference: entry.reference || reference
-        }));
-
-        const ledgerDocs = await Ledger.insertMany(docsToInsert, { session });
-
-        const checkpointEntry = checkpointAccount
-            ? ledgerDocs.find((entry) => entry.account === checkpointAccount)
-            : ledgerDocs[ledgerDocs.length - 1];
-
-        const walletUpdate = {
-            $set: {
-                ...(checkpointEntry ? { lastProcessedLedgerId: checkpointEntry._id } : {})
+            let currentWalletQuery = Wallet.findOne({ userId }).select("balance");
+            if (session) {
+                currentWalletQuery = currentWalletQuery.session(session);
             }
-        };
 
-        if (Math.abs(normalizedWalletDelta) > EPSILON) {
-            walletUpdate.$inc = { balance: normalizedWalletDelta };
-        }
-
-        const wallet = await Wallet.findOneAndUpdate(
-            { userId },
-            walletUpdate,
-            {
-                session,
-                upsert: true,
-                returnDocument: "after",
-                setDefaultsOnInsert: true
+            const currentWallet = await currentWalletQuery;
+            const currentBalance = Number(currentWallet?.balance || 0);
+            if (enforceNonNegativeBalance && currentBalance + normalizedWalletDelta < -EPSILON) {
+                throw new Error("Insufficient wallet balance");
             }
-        );
 
-        await session.commitTransaction();
+            const docsToInsert = entries.map((entry) => ({
+                eventId: entry.eventId || eventId,
+                userId,
+                account: entry.account,
+                amount: Number(entry.amount),
+                currency: entry.currency || "KES",
+                reference: entry.reference || reference,
+                idempotencyKey: buildLedgerIdempotencyKey({
+                    eventId: entry.eventId || eventId,
+                    userId,
+                    account: entry.account
+                })
+            }));
 
-        return {
-            wallet,
-            ledgerDocs,
-            wasDuplicate: false
-        };
+            const insertOptions = session ? { session, ordered: true } : { ordered: true };
+            const ledgerDocs = await Ledger.insertMany(docsToInsert, insertOptions);
+
+            const checkpointEntry = checkpointAccount
+                ? ledgerDocs.find((entry) => entry.account === checkpointAccount)
+                : ledgerDocs[ledgerDocs.length - 1];
+
+            const walletUpdate = {
+                $set: {
+                    ...(checkpointEntry ? { lastProcessedLedgerId: checkpointEntry._id } : {})
+                }
+            };
+
+            if (Math.abs(normalizedWalletDelta) > EPSILON) {
+                walletUpdate.$inc = { balance: normalizedWalletDelta };
+            }
+
+            const wallet = await Wallet.findOneAndUpdate(
+                { userId },
+                walletUpdate,
+                {
+                    ...(session ? { session } : {}),
+                    upsert: true,
+                    returnDocument: "after",
+                    setDefaultsOnInsert: true
+                }
+            );
+
+            return {
+                wallet,
+                ledgerDocs,
+                wasDuplicate: false
+            };
+        }, { label: "post-ledger" });
     } catch (error) {
-        await session.abortTransaction();
+        if (isDuplicateLedgerError(error)) {
+            const existingWallet = await Wallet.findOne({ userId });
+            return {
+                wallet: existingWallet,
+                ledgerDocs: [],
+                wasDuplicate: true
+            };
+        }
         throw error;
-    } finally {
-        await session.endSession();
     }
 };

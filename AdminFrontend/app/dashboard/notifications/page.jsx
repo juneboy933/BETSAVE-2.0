@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getAdminToken, request } from "../../../lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { request } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function AdminDashboardNotifications() {
   const [notifications, setNotifications] = useState([]);
@@ -10,27 +11,23 @@ export default function AdminDashboardNotifications() {
   const [total, setTotal] = useState(0);
   const pageSize = 10;
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setError("");
-      const headers = { "x-admin-token": getAdminToken() };
       await request("/api/v1/dashboard/admin/notifications/read-all", {
-        method: "PATCH",
-        headers
+        method: "PATCH"
       });
-      const data = await request(`/api/v1/dashboard/admin/notifications?page=${currentPage}&limit=${pageSize}`, { headers });
+      const data = await request(`/api/v1/dashboard/admin/notifications?page=${currentPage}&limit=${pageSize}`);
       setNotifications(data.notifications || []);
       setTotal(Number(data.total) || 0);
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, [currentPage, pageSize]);
 
   useEffect(() => {
-    load();
-    const intervalId = setInterval(load, 10000);
-    return () => clearInterval(intervalId);
-  }, [currentPage]);
+    return attachVisiblePolling(load);
+  }, [load]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 

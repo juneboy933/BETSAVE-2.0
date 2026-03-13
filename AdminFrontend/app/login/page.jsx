@@ -44,7 +44,7 @@ export default function AdminLoginPage() {
         <article className="auth-card">
           <h1 className="text-3xl font-bold text-slate-900">Login Admin</h1>
           <p className="mt-2 text-sm text-slate-600">
-            Need an account? <Link className="font-semibold text-brand" href="/register">Register here</Link>.
+            Need an account? Ask an existing admin to create an invitation code from Dashboard Access, then <Link className="font-semibold text-brand" href="/register">register here</Link>.
           </p>
 
           <label className="label">Backend API URL</label>

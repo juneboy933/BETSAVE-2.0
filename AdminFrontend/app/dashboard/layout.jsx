@@ -2,19 +2,20 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AnimatedNumber from "../../components/AnimatedNumber";
 import {
   clearAdminToken,
   getAdminOperatingMode,
-  getAdminToken,
-  hasAdminToken,
+  markAdminSessionActive,
   request,
   setAdminOperatingMode
 } from "../../lib/api";
+import { attachVisiblePolling } from "../../lib/polling";
 
 const navLinks = [
   { href: "/dashboard", label: "Overview" },
+  { href: "/dashboard/access", label: "Access", primaryAdminOnly: true },
   { href: "/dashboard/partners", label: "Partners" },
   { href: "/dashboard/users", label: "Users" },
   { href: "/dashboard/events", label: "Events" },
@@ -26,6 +27,7 @@ const navLinks = [
 export default function AdminDashboardLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [navOpen, setNavOpen] = useState(false);
   const [operatingMode, setOperatingModeState] = useState("live");
   const [stats, setStats] = useState({
     totalWalletBalance: 0,
@@ -35,13 +37,16 @@ export default function AdminDashboardLayout({ children }) {
     totalSavingsLedger: 0
   });
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [shellError, setShellError] = useState("");
+  const [canManageAdminInvitations, setCanManageAdminInvitations] = useState(false);
   const toPositiveNumber = (value) => Math.max(0, Number(value) || 0);
-  const loadDashboardShellData = async () => {
+  const loadDashboardShellData = useCallback(async () => {
     try {
-      const headers = { "x-admin-token": getAdminToken() };
-      const [overview, notifications] = await Promise.all([
-        request("/api/v1/dashboard/admin/overview", { headers }),
-        request("/api/v1/dashboard/admin/notifications/summary", { headers })
+      setShellError("");
+      const [overview, notifications, session] = await Promise.all([
+        request("/api/v1/dashboard/admin/overview"),
+        request("/api/v1/dashboard/admin/notifications/summary"),
+        request("/api/v1/admin/auth/session")
       ]);
       setStats({
         totalWalletBalance: toPositiveNumber(overview.metrics?.totalWalletBalance),
@@ -51,19 +56,26 @@ export default function AdminDashboardLayout({ children }) {
         totalSavingsLedger: toPositiveNumber(overview.metrics?.totalSavingsLedger)
       });
       setUnreadNotifications(toPositiveNumber(notifications.unreadCount));
-    } catch {}
-  };
+      setCanManageAdminInvitations(Boolean(session?.admin?.canManageAdminInvitations));
+      markAdminSessionActive();
+    } catch (error) {
+      if (error.status === 401 || error.status === 403) {
+        clearAdminToken();
+        router.replace("/login");
+        return;
+      }
+      setShellError(error.message || "Failed to load admin shell");
+    }
+  }, [router]);
 
   useEffect(() => {
-    if (!hasAdminToken()) {
-      router.replace("/login");
-      return;
-    }
     setOperatingModeState(getAdminOperatingMode());
-    loadDashboardShellData();
-    const intervalId = setInterval(loadDashboardShellData, 10000);
-    return () => clearInterval(intervalId);
-  }, [router]);
+    return attachVisiblePolling(loadDashboardShellData);
+  }, [loadDashboardShellData]);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
 
   const switchOperatingMode = async (nextMode) => {
     const targetMode = String(nextMode || "").trim().toLowerCase() === "demo" ? "demo" : "live";
@@ -75,49 +87,117 @@ export default function AdminDashboardLayout({ children }) {
     await loadDashboardShellData();
   };
 
+  const visibleNavLinks = navLinks.filter((link) => !(link.primaryAdminOnly && !canManageAdminInvitations));
+
   return (
     <section className="dashboard-shell">
       <header className="nav-shell">
-        <Link href="/" className="brand-lockup">
-          <div className="brand-logo">B</div>
-          <div>
-            <p className="brand-title">Betsave</p>
-            <p className="brand-subtitle">Admin Dashboard</p>
-          </div>
-        </Link>
-        <button
-          className="btn-secondary"
-          onClick={() => {
-            clearAdminToken();
-            router.push("/login");
-          }}
-        >
-          Logout
-        </button>
-      </header>
-
-      <section className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Admin View Mode</p>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="flex flex-1 items-center gap-3">
           <button
-            className={`btn-secondary ${operatingMode === "demo" ? "border-slate-900 text-slate-900" : ""}`}
-            onClick={() => switchOperatingMode("demo")}
+            type="button"
+            className="btn-secondary px-4 py-2 lg:hidden"
+            onClick={() => setNavOpen((current) => !current)}
           >
-            Demo
+            {navOpen ? "Close Menu" : "Open Menu"}
           </button>
-          <button
-            className={`btn-secondary ${operatingMode === "live" ? "border-emerald-700 text-emerald-700" : ""}`}
-            onClick={() => switchOperatingMode("live")}
-          >
-            Live
-          </button>
-          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${operatingMode === "live" ? "bg-emerald-50 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>
+          <Link href="/" className="brand-lockup">
+            <div className="brand-logo">B</div>
+            <div>
+              <p className="brand-title">Betsave</p>
+              <p className="brand-subtitle">Admin Dashboard</p>
+            </div>
+          </Link>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${operatingMode === "live" ? "bg-emerald-50 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>
             {operatingMode.toUpperCase()}
           </span>
+          <button
+            className="btn-secondary"
+            onClick={async () => {
+              try {
+                await request("/api/v1/admin/auth/logout", {
+                  method: "POST"
+                });
+              } catch {}
+              clearAdminToken();
+              router.push("/login");
+            }}
+          >
+            Logout
+          </button>
         </div>
-        <p className="mt-2 text-xs text-slate-600">
-          Demo mode shows only demo partner event streams. Live mode shows only live production event streams.
-        </p>
+      </header>
+
+      <section className="card overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,60,95,0.18),_transparent_38%),linear-gradient(135deg,_rgba(255,255,255,0.96),_rgba(243,246,251,0.92))]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)]">
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Control center</p>
+              <h1 className="mt-2 text-3xl font-bold text-slate-950 sm:text-4xl">Operational governance</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                Use this shell to monitor partner exposure, event throughput, and savings performance without losing context on mobile or desktop.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <article className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Total users</p>
+                <p className="mt-2 text-2xl font-bold text-slate-950">
+                  <AnimatedNumber value={stats.totalUsers} />
+                </p>
+              </article>
+              <article className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Active partners</p>
+                <p className="mt-2 text-2xl font-bold text-slate-950">
+                  <AnimatedNumber value={stats.activePartners} />
+                </p>
+              </article>
+              <article className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Unread notifications</p>
+                <p className="mt-2 text-2xl font-bold text-slate-950">
+                  <AnimatedNumber value={unreadNotifications} />
+                </p>
+              </article>
+            </div>
+          </div>
+          <div className="rounded-3xl border border-slate-200/80 bg-slate-950 p-5 text-slate-50 shadow-xl shadow-slate-900/10">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Admin view mode</p>
+                <p className="mt-2 text-xl font-semibold">{operatingMode.toUpperCase()}</p>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${operatingMode === "live" ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-800 text-slate-200"}`}>
+                Scoped
+              </span>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <button
+                className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
+                  operatingMode === "demo"
+                    ? "border-white/60 bg-white text-slate-950"
+                    : "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500"
+                }`}
+                onClick={() => switchOperatingMode("demo")}
+              >
+                Demo
+              </button>
+              <button
+                className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
+                  operatingMode === "live"
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+                    : "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-500"
+                }`}
+                onClick={() => switchOperatingMode("live")}
+              >
+                Live
+              </button>
+            </div>
+            <p className="mt-4 text-sm leading-6 text-slate-300">
+              Demo mode filters admin insights to demo partner traffic and demo-scoped ledger exposure. Live mode shows production activity only.
+            </p>
+            {shellError ? <p className="mt-3 text-sm font-semibold text-rose-300">{shellError}</p> : null}
+          </div>
+        </div>
       </section>
 
       <section className="kpi-grid">
@@ -144,10 +224,10 @@ export default function AdminDashboardLayout({ children }) {
       </section>
 
       <div className="dashboard-body">
-        <aside className="sidebar">
+        <aside className={`sidebar ${navOpen ? "block" : "hidden"} lg:block`}>
           <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-500">Navigation</p>
           <nav className="space-y-2">
-            {navLinks.map((n) => (
+            {visibleNavLinks.map((n) => (
               <Link key={n.href} href={n.href} className={`sidebar-link ${pathname === n.href ? "active" : ""}`}>
                 <span className="flex items-center justify-between">
                   <span>{n.label}</span>

@@ -18,15 +18,23 @@ import { validatePartnerModeConfiguration } from './middleware/partnerMode.middl
 
 const PORT = env.PORT;
 const app = express();
+let server;
+
+const terminateProcess = (error, context) => {
+    logger.error(`[startup] ${context}`, { error: error?.stack || error?.message || String(error) });
+    if (server) {
+        server.close(() => process.exit(1));
+        return;
+    }
+    process.exit(1);
+};
 
 // handle unexpected errors globally so the process can exit or restart gracefully
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('[startup] Unhandled Rejection:', reason);
-    // optionally: send to monitoring service
+process.on('unhandledRejection', (reason) => {
+    terminateProcess(reason, 'Unhandled Rejection');
 });
 process.on('uncaughtException', (err) => {
-    console.error('[startup] Uncaught Exception:', err);
-    // in production you'd typically exit here and let the container restart
+    terminateProcess(err, 'Uncaught Exception');
 });
 
 // security middleware
@@ -35,15 +43,34 @@ app.use(express.json());
 
 // CORS handling with whitelist
 const corsOrigins = env.CORS_ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean);
+const defaultAllowedHeaders = [
+    'Content-Type',
+    'Authorization',
+    'x-api-key',
+    'x-signature',
+    'x-timestamp',
+    'x-user-phone',
+    'x-user-token',
+    'x-admin-token',
+    'x-callback-token',
+    'x-integration-token'
+];
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && corsOrigins.length && corsOrigins.includes(origin)) {
+    const allowOrigin = origin && (!corsOrigins.length || corsOrigins.includes(origin));
+    if (allowOrigin) {
         res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+        res.header('Vary', 'Origin');
     }
-    res.header(
-        'Access-Control-Allow-Headers',
-        'Content-Type, x-api-key, x-signature, x-timestamp, x-user-phone, x-admin-token, x-callback-token, x-integration-token'
-    );
+
+    const requestedHeaders = String(req.headers['access-control-request-headers'] || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+    const allowHeaders = [...new Set([...defaultAllowedHeaders, ...requestedHeaders])];
+
+    res.header('Access-Control-Allow-Headers', allowHeaders.join(', '));
     res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
@@ -54,7 +81,10 @@ const limiter = rateLimit({
     windowMs: env.RATE_LIMIT_WINDOW_MS,
     max: env.RATE_LIMIT_MAX,
     standardHeaders: true,
-    legacyHeaders: false
+    legacyHeaders: false,
+    skip: (req) =>
+        req.path === "/health" ||
+        req.path.startsWith("/api/v1/payments/callbacks/")
 });
 app.use(limiter);
 
@@ -82,7 +112,11 @@ app.use('/api/v1/payments', paymentRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {
-    console.error(err);
+    logger.error("Unhandled request error", {
+        path: req.originalUrl,
+        method: req.method,
+        error: err?.stack || err?.message || String(err)
+    });
     res.status(500).json({
         error: "Internal Server Error"
     });
@@ -110,7 +144,7 @@ try {
 
 connectDB()
     .then(() => {
-        app.listen(PORT, () => {
+        server = app.listen(PORT, () => {
             logger.info(`Server running on http://localhost:${PORT}`);
         });
     })

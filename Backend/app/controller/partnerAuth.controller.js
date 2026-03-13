@@ -1,9 +1,27 @@
 import PartnerAuth from "../../database/models/partnerAuth.model.js";
 import Partner from "../../database/models/partner.model.js";
-import { hashPassword, generateSalt, generatePartnerJWT } from "../../service/partnerAuth.service.js";
+import {
+    decryptPartnerApiSecret,
+    encryptPartnerApiSecret,
+    hashPassword,
+    generateSalt,
+    generatePartnerJWT,
+    verifyPartnerJWT
+} from "../../service/partnerAuth.service.js";
 import crypto from "crypto";
+import { buildClearedSessionCookie, buildSessionCookie, parseCookies } from "../http/cookie.js";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PARTNER_COOKIE_NAME = "betsave_partner_session";
+const PARTNER_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
+
+const attachPartnerSessionCookie = (res, token) => {
+    res.setHeader("Set-Cookie", buildSessionCookie({
+        name: PARTNER_COOKIE_NAME,
+        value: token,
+        maxAgeSeconds: PARTNER_SESSION_MAX_AGE_SECONDS
+    }));
+};
 
 /**
  * Register a new partner with email and password.
@@ -65,7 +83,7 @@ export const registerPartnerAuth = async (req, res) => {
             name: name.trim(),
             email: normalizedEmail,
             apiKey,
-            apiSecret,
+            apiSecretEncrypted: encryptPartnerApiSecret(apiSecret),
             webhookUrl: webhookUrl?.trim() || null,
             operatingMode: operatingMode === "live" ? "live" : "demo",
             status: "ACTIVE"
@@ -85,6 +103,7 @@ export const registerPartnerAuth = async (req, res) => {
 
         // generate JWT for immediate dashboard access
         const token = generatePartnerJWT(partner._id, normalizedEmail, partner.name);
+        attachPartnerSessionCookie(res, token);
 
         // return API credentials (only once!)
         return res.status(201).json({
@@ -165,6 +184,7 @@ export const loginPartnerAuth = async (req, res) => {
             normalizedEmail,
             partnerAuth.partnerId.name
         );
+        attachPartnerSessionCookie(res, token);
 
         return res.json({
             status: "SUCCESS",
@@ -191,8 +211,9 @@ export const loginPartnerAuth = async (req, res) => {
  */
 export const refreshPartnerToken = async (req, res) => {
     try {
-        const authHeader = req.headers.authorization || "";
-        const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+        const authHeader = String(req.headers.authorization || "").trim();
+        const cookies = parseCookies(req.headers.cookie);
+        const token = authHeader.replace(/^Bearer\s+/i, "").trim() || String(cookies[PARTNER_COOKIE_NAME] || "").trim();
 
         if (!token) {
             return res.status(401).json({
@@ -201,18 +222,25 @@ export const refreshPartnerToken = async (req, res) => {
             });
         }
 
-        let decoded;
-        try {
-            decoded = require("jsonwebtoken").verify(token, process.env.PARTNER_JWT_SECRET);
-        } catch (err) {
+        const decoded = verifyPartnerJWT(token);
+        if (!decoded?.partnerId || !decoded?.email || !decoded?.name) {
             return res.status(401).json({
                 status: "FAILED",
                 reason: "Invalid or expired token"
             });
         }
 
+        const partner = await Partner.findById(decoded.partnerId).select("name status");
+        if (!partner || partner.status !== "ACTIVE") {
+            return res.status(403).json({
+                status: "FAILED",
+                reason: "Partner not active"
+            });
+        }
+
         // regenerate token
-        const newToken = generatePartnerJWT(decoded.partnerId, decoded.email, decoded.name);
+        const newToken = generatePartnerJWT(decoded.partnerId, decoded.email, partner.name);
+        attachPartnerSessionCookie(res, newToken);
 
         return res.json({
             status: "SUCCESS",
@@ -225,4 +253,11 @@ export const refreshPartnerToken = async (req, res) => {
             reason: error.message
         });
     }
+};
+
+export const logoutPartnerAuth = async (_req, res) => {
+    res.setHeader("Set-Cookie", buildClearedSessionCookie(PARTNER_COOKIE_NAME));
+    return res.json({
+        status: "SUCCESS"
+    });
 };

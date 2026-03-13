@@ -5,6 +5,7 @@ import {
     getPartnerNotificationSummary,
     getPartnerNotifications,
     getPartnerSavingsBehavior,
+    getPartnerUserDemoState,
     getPartnerUsers,
     markPartnerNotificationsRead
 } from '../controller/partnerDashboard.controller.js';
@@ -16,6 +17,7 @@ router.get('/events', verifyPartnerDashboard, getPartnerEvents);
 router.get('/analytics', verifyPartnerDashboard, getPartnerAnalytics);
 router.get('/savings-behavior', verifyPartnerDashboard, getPartnerSavingsBehavior);
 router.get('/users', verifyPartnerDashboard, getPartnerUsers);
+router.get('/user-demo', verifyPartnerDashboard, getPartnerUserDemoState);
 router.get('/notifications', verifyPartnerDashboard, getPartnerNotifications);
 router.get('/notifications/summary', verifyPartnerDashboard, getPartnerNotificationSummary);
 router.patch('/notifications/read-all', verifyPartnerDashboard, markPartnerNotificationsRead);

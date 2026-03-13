@@ -7,14 +7,17 @@ import {
     handleDepositCallback,
     handleWithdrawalCallback
 } from "../controller/payment.controller.js";
-import { verifyUserToken } from "../middleware/userAuth.middleware.js";
+import {
+    requireAuthenticatedUserOwnership,
+    verifyUserToken
+} from "../middleware/userAuth.middleware.js";
 
 const router = express.Router();
 
-router.post("/:userId/deposits", verifyUserToken, createDeposit);
-router.post("/:userId/withdrawals", verifyUserToken, createWithdrawal);
-router.get("/:userId/transactions", verifyUserToken, getUserPaymentTransactions);
-router.get("/:userId/transactions/:paymentTransactionId", verifyUserToken, getPaymentTransactionById);
+router.post("/:userId/deposits", verifyUserToken, requireAuthenticatedUserOwnership(), createDeposit);
+router.post("/:userId/withdrawals", verifyUserToken, requireAuthenticatedUserOwnership(), createWithdrawal);
+router.get("/:userId/transactions", verifyUserToken, requireAuthenticatedUserOwnership(), getUserPaymentTransactions);
+router.get("/:userId/transactions/:paymentTransactionId", verifyUserToken, requireAuthenticatedUserOwnership(), getPaymentTransactionById);
 
 router.post("/callbacks/deposit", handleDepositCallback);
 router.post("/callbacks/withdrawal", handleWithdrawalCallback);

@@ -12,6 +12,13 @@ const eventSchema = new mongoose.Schema({
         required: false,
         default: null,
     },
+    paymentTransactionId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "PaymentTransaction",
+        required: false,
+        default: null,
+        index: true
+    },
     phone: {
         type: String,
         required: true,
@@ -40,6 +47,24 @@ const eventSchema = new mongoose.Schema({
         type: String,
         enum: ['RECEIVED', 'PROCESSING', 'PROCESSED', 'FAILED'],
         default: 'RECEIVED'
+    },
+    failureReason: {
+        type: String,
+        trim: true,
+        default: null
+    },
+    finalizedAt: {
+        type: Date,
+        default: null
+    },
+    lastNotificationStatus: {
+        type: String,
+        enum: ['PROCESSED', 'FAILED'],
+        default: null
+    },
+    lastNotificationAt: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 

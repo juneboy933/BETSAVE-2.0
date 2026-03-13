@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getAdminToken, request } from "../../../lib/api";
+import { request } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function AdminDashboardSavings() {
   const [summary, setSummary] = useState(null);
@@ -17,9 +18,7 @@ export default function AdminDashboardSavings() {
   const refresh = useCallback(async () => {
     try {
       setError("");
-      const data = await request("/api/v1/dashboard/admin/savings", {
-        headers: { "x-admin-token": getAdminToken() }
-      });
+      const data = await request("/api/v1/dashboard/admin/savings");
       setSummary(data.summary || null);
       setByPartner(data.byPartner || []);
       setRecentEntries(data.recentSavingsEntries || []);
@@ -29,9 +28,7 @@ export default function AdminDashboardSavings() {
   }, []);
 
   useEffect(() => {
-    refresh();
-    const intervalId = setInterval(refresh, 10000);
-    return () => clearInterval(intervalId);
+    return attachVisiblePolling(refresh);
   }, [refresh]);
 
   useEffect(() => {

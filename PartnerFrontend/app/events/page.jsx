@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getPartnerCreds, signedRequest } from "../../lib/api";
+import { partnerRequest } from "../../lib/api";
 
 export default function EventsPage() {
   const [form, setForm] = useState({ eventId: `BET-${Date.now()}`, phone: "", amount: 0, type: "BET_PLACED" });
@@ -20,14 +20,11 @@ export default function EventsPage() {
 
   const sendEvent = async () => {
     try {
-      const creds = getPartnerCreds();
       setErr("");
-      const result = await signedRequest({
+      const result = await partnerRequest("/api/v1/partners/events", {
         method: "POST",
-        path: "/api/v1/partners/events",
-        body: { ...form, amount: Number(form.amount) },
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, amount: Number(form.amount) })
       });
       setMsg(`Event accepted: ${result.eventId}`);
       setForm((prev) => ({ ...prev, eventId: `BET-${Date.now()}` }));
@@ -39,15 +36,8 @@ export default function EventsPage() {
 
   const loadEvents = async () => {
     try {
-      const creds = getPartnerCreds();
       setErr("");
-      const data = await signedRequest({
-        method: "GET",
-        path: "/api/v1/dashboard/partner/events?page=1&limit=100",
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
-      });
+      const data = await partnerRequest("/api/v1/dashboard/partner/events?page=1&limit=100");
       setEvents(data.events || []);
     } catch (error) {
       setErr(error.message);

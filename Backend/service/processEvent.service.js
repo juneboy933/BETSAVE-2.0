@@ -2,27 +2,21 @@ import Event from "../database/models/event.model.js";
 import Partner from "../database/models/partner.model.js";
 import { initiateDeposit } from "./paymentCollection.service.js";
 import { initiateStkPush, isDarajaCollectionEnabled } from "./daraja.client.js";
+import {
+    buildEventExternalRef,
+    buildEventStkIdempotencyKey,
+    normalizeOperatingMode
+} from "./eventReference.service.js";
+import { finalizeEvent } from "./eventFinalization.service.js";
+import { buildSignedCallbackUrl } from "./paymentCallbackSecurity.service.js";
 import dotenv from "dotenv";
 
 dotenv.config();
-
-const normalizeOperatingMode = (value) => {
-    const mode = String(value || "").trim().toLowerCase();
-    if (mode === "live") return "live";
-    if (mode === "demo") return "demo";
-    return null;
-};
 
 const getPartnerOperatingMode = async (partnerName) => {
     const partner = await Partner.findOne({ name: partnerName }).select("operatingMode").lean();
     return normalizeOperatingMode(partner?.operatingMode) || "demo";
 };
-
-const buildEventStkIdempotencyKey = ({ partnerName, eventId, userId }) =>
-    `event-stk::${partnerName}::${eventId}::${String(userId)}`;
-
-const buildEventExternalRef = ({ partnerName, operatingMode, eventId }) =>
-    `EVENT::${partnerName}::${operatingMode}::${eventId}`;
 
 export const processEvent = async (eventId, partnerName, requestedOperatingMode = null) => {
     const requestedMode = normalizeOperatingMode(requestedOperatingMode);
@@ -65,10 +59,6 @@ export const processEvent = async (eventId, partnerName, requestedOperatingMode 
             throw new Error("Unsupported event operating mode for event-driven STK processing");
         }
 
-        if (!isDarajaCollectionEnabled()) {
-            throw new Error("Daraja collection is not configured for event-driven STK processing");
-        }
-
         const idempotencyKey = buildEventStkIdempotencyKey({
             partnerName,
             eventId: event.eventId,
@@ -88,12 +78,24 @@ export const processEvent = async (eventId, partnerName, requestedOperatingMode 
             externalRef
         });
 
+        event.paymentTransactionId = paymentTransaction._id;
+        await event.save();
+
+        if (!isDarajaCollectionEnabled()) {
+            throw new Error("Daraja collection is not configured for event-driven STK processing");
+        }
+
         if (!paymentTransaction.providerRequestId && paymentTransaction.status === "INITIATED") {
             const providerAck = await initiateStkPush({
                 phone: paymentTransaction.phone,
                 amount: paymentTransaction.amount,
                 accountReference: paymentTransaction.externalRef || externalRef,
-                transactionDesc: `Savings collection for event ${event.eventId}`
+                transactionDesc: `Savings collection for event ${event.eventId}`,
+                callbackUrl: buildSignedCallbackUrl({
+                    baseUrl: process.env.DARAJA_STK_CALLBACK_URL,
+                    callbackType: "deposit",
+                    resourceId: paymentTransaction._id
+                })
             });
 
             paymentTransaction.status = "PENDING";
@@ -113,11 +115,13 @@ export const processEvent = async (eventId, partnerName, requestedOperatingMode 
         };
 
     } catch (error) {
-        await Event.findOneAndUpdate(
-            { eventId, partnerName, status: 'PROCESSING' },
-            { $set: { status: 'FAILED' } }
-        );
+        await finalizeEvent({
+            event,
+            nextStatus: "FAILED",
+            failureReason: error.message,
+            notifyPartner: true
+        });
         console.error('Failed to process event:', error.message);
-        return { status: 'FAILED', reason: error.message, notifyPartner: true };
+        return { status: 'FAILED', reason: error.message, notifyPartner: false };
     }
 };

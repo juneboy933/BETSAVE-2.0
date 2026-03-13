@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getPartnerCreds, getPartnerOperatingMode, signedRequest } from "../../../lib/api";
+import { useCallback, useEffect, useState } from "react";
+import { getPartnerOperatingMode, partnerRequest } from "../../../lib/api";
+import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function PartnerDashboardEvents() {
   const [form, setForm] = useState({ eventId: `BET-${Date.now()}`, phone: "", amount: 0, type: "BET_PLACED" });
@@ -22,34 +23,26 @@ export default function PartnerDashboardEvents() {
     Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
   const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     try {
       setError("");
       setOperatingMode(getPartnerOperatingMode());
-      const creds = getPartnerCreds();
-      const data = await signedRequest({
-        method: "GET",
-        path: `/api/v1/dashboard/partner/events?page=1&limit=100${filters.status !== "ALL" ? `&status=${encodeURIComponent(filters.status)}` : ""}`,
-        body: {},
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
-      });
+      const data = await partnerRequest(
+        `/api/v1/dashboard/partner/events?page=1&limit=100${filters.status !== "ALL" ? `&status=${encodeURIComponent(filters.status)}` : ""}`
+      );
       setEvents(data.events || []);
     } catch (err) {
       setError(err.message);
     }
-  };
+  }, [filters.status]);
 
   const send = async () => {
     try {
       setError("");
-      const creds = getPartnerCreds();
-      const result = await signedRequest({
+      const result = await partnerRequest("/api/v1/partners/events", {
         method: "POST",
-        path: "/api/v1/partners/events",
-        body: { ...form, amount: Number(form.amount) },
-        apiKey: creds.apiKey,
-        apiSecret: creds.apiSecret
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, amount: Number(form.amount) })
       });
       setMessage(`Event queued: ${result.eventId}`);
       setForm((prev) => ({ ...prev, eventId: `BET-${Date.now()}` }));
@@ -60,10 +53,17 @@ export default function PartnerDashboardEvents() {
   };
 
   useEffect(() => {
-    refresh();
-    const intervalId = setInterval(refresh, 10000);
-    return () => clearInterval(intervalId);
-  }, [filters.status]);
+    return attachVisiblePolling(refresh);
+  }, [refresh]);
+
+  useEffect(() => {
+    const onPartnerModeChanged = () => {
+      setOperatingMode(getPartnerOperatingMode());
+      refresh();
+    };
+    window.addEventListener("partner-mode-changed", onPartnerModeChanged);
+    return () => window.removeEventListener("partner-mode-changed", onPartnerModeChanged);
+  }, [refresh]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -90,7 +90,7 @@ export default function PartnerDashboardEvents() {
       <h2 className="text-lg font-bold">Bet Event Stream</h2>
       {operatingMode === "demo" ? (
         <section className="callout">
-          Demo composer below is for sandbox walkthroughs. Demo mode does not apply live wallet credits.
+          Demo composer below can still trigger a real STK push when collection is configured. The resulting payment and ledger records stay demo-scoped, and the user's live spendable wallet balance is not increased.
         </section>
       ) : (
         <section className="callout">

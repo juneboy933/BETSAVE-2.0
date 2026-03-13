@@ -1,8 +1,8 @@
-import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import env from "../config.js";
 import User from "../../database/models/user.model.js";
 import Wallet from "../../database/models/wallet.model.js";
+import { runInTransaction } from "../../service/databaseSession.service.js";
 
 const KENYA_PHONE_REGEX = /^\+254\d{9}$/;
 
@@ -17,30 +17,30 @@ export const registerUser = async (req, res) => {
     });
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
-    const user = await User.create(
-      [{ phoneNumber: normalizePhone }],
-      { session }
-    );
+    const created = await runInTransaction(async (session) => {
+      const createOptions = session ? { session } : undefined;
+      const user = await User.create(
+        [{ phoneNumber: normalizePhone }],
+        createOptions
+      );
 
-    await Wallet.create(
-      [{
-        userId: user[0]._id,
-        balance: 0,
-        lastProcessedLedgerId: null,
-      }],
-      { session }
-    );
+      await Wallet.create(
+        [{
+          userId: user[0]._id,
+          balance: 0,
+          lastProcessedLedgerId: null,
+        }],
+        createOptions
+      );
 
-    await session.commitTransaction();
+      return user[0];
+    }, { label: "register-user" });
 
     // generate a JWT so the client can authenticate subsequent requests
     const token = jwt.sign(
       {
-        userId: user[0]._id.toString(),
+        userId: created._id.toString(),
         phoneNumber: normalizePhone
       },
       env.USER_JWT_SECRET,
@@ -49,13 +49,11 @@ export const registerUser = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      userId: user[0]._id,
+      userId: created._id,
       token
     });
 
   } catch (error) {
-    await session.abortTransaction();
-
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
@@ -67,7 +65,5 @@ export const registerUser = async (req, res) => {
       success: false,
       error: "Registration failed",
     });
-  } finally {
-    await session.endSession();
   }
 };

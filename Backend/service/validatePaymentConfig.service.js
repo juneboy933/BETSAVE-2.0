@@ -61,10 +61,13 @@ export const validatePaymentConfiguration = () => {
         throw new Error(`Missing required payment env vars: ${missing.join(", ")}`);
     }
 
+    if (!getEnv("PAYMENT_CALLBACK_TOKEN")) {
+        throw new Error("PAYMENT_CALLBACK_TOKEN is required when payments are enabled");
+    }
+
     return {
         env,
         depositsEnabled,
         withdrawalsEnabled
     };
 };
-

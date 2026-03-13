@@ -2,25 +2,19 @@ import express from 'express';
 import Joi from 'joi';
 import { validateBody } from '../middleware/validation.middleware.js';
 import {
-    createPartner,
-    getPartnerCredentials,
     getPartnerOperatingMode,
-    loginPartner,
     registerUserFromPartner,
     setPartnerOperatingMode,
     verifyPartnerUserOtp
 } from '../controller/partner.controller.js';
-import { verifyPartner } from '../middleware/partnerAuth.middleware.js';
+import { verifyPartnerDashboard } from '../middleware/partnerDashboardAuth.middleware.js';
 import { requirePartnerIntegrationInLiveMode } from '../middleware/partnerMode.middleware.js';
 import { postEvent } from '../controller/event.controller.js';
 
 const router = express.Router();
 
-router.post('/create', createPartner);
-router.post('/login', loginPartner);
-router.get('/credentials', verifyPartner, getPartnerCredentials);
-router.get('/mode', verifyPartner, getPartnerOperatingMode);
-router.patch('/mode', verifyPartner, setPartnerOperatingMode);
+router.get('/mode', verifyPartnerDashboard, getPartnerOperatingMode);
+router.patch('/mode', verifyPartnerDashboard, setPartnerOperatingMode);
 const eventSchema = Joi.object({
     eventId: Joi.string().required(),
     phone: Joi.string().pattern(/^\+254\d{9}$/).required(),
@@ -29,23 +23,35 @@ const eventSchema = Joi.object({
 });
 
 const newPartnerUserSchema = Joi.object({
-    phone: Joi.string().pattern(/^\+254\d{9}$/).required()
+    phone: Joi.string().pattern(/^\+254\d{9}$/).required(),
+    autoSavingsEnabled: Joi.boolean().optional()
+});
+
+const verifyPartnerOtpSchema = Joi.object({
+    phone: Joi.string().pattern(/^\+254\d{9}$/).required(),
+    otp: Joi.string().min(4).max(6).required()
 });
 
 router.post(
     '/events',
-    verifyPartner,
+    verifyPartnerDashboard,
     requirePartnerIntegrationInLiveMode,
     validateBody(eventSchema),
     postEvent
 );
 router.post(
     '/users/register',
-    verifyPartner,
+    verifyPartnerDashboard,
     requirePartnerIntegrationInLiveMode,
     validateBody(newPartnerUserSchema),
     registerUserFromPartner
 );
-router.post('/users/verify-otp', verifyPartner, requirePartnerIntegrationInLiveMode, validateBody(newPartnerUserSchema), verifyPartnerUserOtp);
+router.post(
+    '/users/verify-otp',
+    verifyPartnerDashboard,
+    requirePartnerIntegrationInLiveMode,
+    validateBody(verifyPartnerOtpSchema),
+    verifyPartnerUserOtp
+);
 
 export default router;

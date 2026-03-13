@@ -133,7 +133,7 @@ export const getDarajaAccessToken = async () => {
     return accessToken;
 };
 
-export const initiateStkPush = async ({ phone, amount, accountReference, transactionDesc }) => {
+export const initiateStkPush = async ({ phone, amount, accountReference, transactionDesc, callbackUrl = null }) => {
     const normalizedPhone = normalizeMsisdn(phone);
     const numericAmount = Math.round(Number(amount));
 
@@ -143,9 +143,9 @@ export const initiateStkPush = async ({ phone, amount, accountReference, transac
 
     const shortCode = getConfigValue("DARAJA_SHORTCODE");
     const passkey = getConfigValue("DARAJA_PASSKEY");
-    const callbackUrl = getConfigValue("DARAJA_STK_CALLBACK_URL");
+    const resolvedCallbackUrl = String(callbackUrl || getConfigValue("DARAJA_STK_CALLBACK_URL")).trim();
 
-    if (!shortCode || !passkey || !callbackUrl) {
+    if (!shortCode || !passkey || !resolvedCallbackUrl) {
         throw new Error("Daraja STK configuration is incomplete");
     }
 
@@ -163,7 +163,7 @@ export const initiateStkPush = async ({ phone, amount, accountReference, transac
         PartyA: normalizedPhone,
         PartyB: shortCode,
         PhoneNumber: normalizedPhone,
-        CallBackURL: callbackUrl,
+        CallBackURL: resolvedCallbackUrl,
         AccountReference: String(accountReference || "BETSAVE"),
         TransactionDesc: String(transactionDesc || "Betsave Deposit")
     };
@@ -184,7 +184,7 @@ export const initiateStkPush = async ({ phone, amount, accountReference, transac
     };
 };
 
-export const initiateB2C = async ({ phone, amount, remarks, occasion }) => {
+export const initiateB2C = async ({ phone, amount, remarks, occasion, timeoutUrl = null, resultUrl = null }) => {
     const normalizedPhone = normalizeMsisdn(phone);
     const numericAmount = Math.round(Number(amount));
 
@@ -195,10 +195,10 @@ export const initiateB2C = async ({ phone, amount, remarks, occasion }) => {
     const shortCode = getConfigValue("DARAJA_B2C_SHORTCODE");
     const initiatorName = getConfigValue("DARAJA_B2C_INITIATOR_NAME");
     const securityCredential = getConfigValue("DARAJA_B2C_SECURITY_CREDENTIAL");
-    const timeoutUrl = getConfigValue("DARAJA_B2C_TIMEOUT_URL");
-    const resultUrl = getConfigValue("DARAJA_B2C_RESULT_URL");
+    const resolvedTimeoutUrl = String(timeoutUrl || getConfigValue("DARAJA_B2C_TIMEOUT_URL")).trim();
+    const resolvedResultUrl = String(resultUrl || getConfigValue("DARAJA_B2C_RESULT_URL")).trim();
 
-    if (!shortCode || !initiatorName || !securityCredential || !timeoutUrl || !resultUrl) {
+    if (!shortCode || !initiatorName || !securityCredential || !resolvedTimeoutUrl || !resolvedResultUrl) {
         throw new Error("Daraja B2C configuration is incomplete");
     }
 
@@ -213,8 +213,8 @@ export const initiateB2C = async ({ phone, amount, remarks, occasion }) => {
         PartyA: shortCode,
         PartyB: normalizedPhone,
         Remarks: String(remarks || "Betsave Withdrawal"),
-        QueueTimeOutURL: timeoutUrl,
-        ResultURL: resultUrl,
+        QueueTimeOutURL: resolvedTimeoutUrl,
+        ResultURL: resolvedResultUrl,
         Occasion: String(occasion || "Betsave")
     };
 

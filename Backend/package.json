@@ -7,7 +7,9 @@
     "start": "node app/server.js",
     "dev": "nodemon app/server.js",
     "worker:event": "node worker/event.worker.js",
-    "worker:webhook": "node worker/webhook.worker.js"
+    "worker:webhook": "node worker/webhook.worker.js",
+    "worker:recovery": "node worker/recovery.worker.js",
+    "test": "node --test --test-concurrency=1 --experimental-test-isolation=none"
   },
   "keywords": [],
   "author": "",

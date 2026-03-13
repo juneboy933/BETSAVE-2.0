@@ -102,7 +102,7 @@ h4 {
   @apply rounded-2xl p-6;
   border: 1px solid rgba(15, 23, 42, 0.1);
   background: var(--surface-card);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
   animation: fade-lift 260ms ease-out;
 }
 
@@ -130,6 +130,14 @@ h4 {
 .btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 12px 20px rgba(34, 60, 95, 0.32);
+}
+
+.btn:disabled,
+.btn-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
 }
 
 .btn-secondary {
@@ -163,6 +171,7 @@ h4 {
 .table td {
   @apply px-4 py-3 align-top text-slate-700;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  word-break: break-word;
 }
 
 .table tr:last-child td {
@@ -256,6 +265,11 @@ h4 {
 @media (min-width: 1024px) {
   .dashboard-body {
     grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 1rem;
   }
 }
 

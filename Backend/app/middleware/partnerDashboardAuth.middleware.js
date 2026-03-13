@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import Partner from "../../database/models/partner.model.js";
 import env from "../config.js";
+import { parseCookies } from "../http/cookie.js";
 import { verifyPartner } from "./partnerAuth.middleware.js";
 
 /**
@@ -12,9 +13,13 @@ import { verifyPartner } from "./partnerAuth.middleware.js";
  */
 export const verifyPartnerDashboard = async (req, res, next) => {
     // check for Bearer token first
-    const auth = req.headers.authorization || "";
-    if (auth.toLowerCase().startsWith("bearer ")) {
-        const token = auth.slice(7).trim();
+    const auth = String(req.headers.authorization || "").trim();
+    const cookies = parseCookies(req.headers.cookie);
+    const token = auth.toLowerCase().startsWith("bearer ")
+        ? auth.slice(7).trim()
+        : String(cookies.betsave_partner_session || "").trim();
+
+    if (token) {
         try {
             const payload = jwt.verify(token, env.PARTNER_JWT_SECRET);
             // ensure partner still active
