@@ -18,7 +18,8 @@ export const postLedger = async ({
     walletDelta = 0,
     idempotencyQuery = null,
     checkpointAccount = null,
-    enforceNonNegativeBalance = false
+    enforceNonNegativeBalance = false,
+    session: providedSession = null
 }) => {
     if (!userId) {
         throw new Error("userId is required");
@@ -38,8 +39,7 @@ export const postLedger = async ({
         throw new Error("Ledger imbalance detected");
     }
 
-    try {
-        return await runInTransaction(async (session) => {
+    const execute = async (session) => {
             if (idempotencyQuery && typeof idempotencyQuery === "object") {
                 let existingEntryQuery = Ledger.findOne(idempotencyQuery).select("_id");
                 if (session) {
@@ -121,7 +121,14 @@ export const postLedger = async ({
                 ledgerDocs,
                 wasDuplicate: false
             };
-        }, { label: "post-ledger" });
+        };
+
+    try {
+        if (providedSession) {
+            return await execute(providedSession);
+        }
+
+        return await runInTransaction(execute, { label: "post-ledger" });
     } catch (error) {
         if (isDuplicateLedgerError(error)) {
             const existingWallet = await Wallet.findOne({ userId });

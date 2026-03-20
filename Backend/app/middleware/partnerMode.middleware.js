@@ -33,6 +33,13 @@ export const requirePartnerIntegrationInLiveMode = (req, res, next) => {
         return next();
     }
 
+    if (req.partnerAuthMethod === "dashboard-session") {
+        return res.status(403).json({
+            status: "FAILED",
+            reason: "Live write actions require signed server-to-server integration authentication"
+        });
+    }
+
     const expectedToken = String(process.env.PARTNER_INTEGRATION_TOKEN || "").trim();
     if (!expectedToken) {
         return res.status(500).json({

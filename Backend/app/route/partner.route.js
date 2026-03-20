@@ -7,19 +7,19 @@ import {
     setPartnerOperatingMode,
     verifyPartnerUserOtp
 } from '../controller/partner.controller.js';
-import { verifyPartnerDashboard } from '../middleware/partnerDashboardAuth.middleware.js';
+import { verifyPartnerDashboard, verifyPartnerDashboardSession } from '../middleware/partnerDashboardAuth.middleware.js';
 import { requirePartnerIntegrationInLiveMode } from '../middleware/partnerMode.middleware.js';
 import { postEvent } from '../controller/event.controller.js';
 
 const router = express.Router();
 
-router.get('/mode', verifyPartnerDashboard, getPartnerOperatingMode);
-router.patch('/mode', verifyPartnerDashboard, setPartnerOperatingMode);
+router.get('/mode', verifyPartnerDashboardSession, getPartnerOperatingMode);
+router.patch('/mode', verifyPartnerDashboardSession, setPartnerOperatingMode);
 const eventSchema = Joi.object({
     eventId: Joi.string().required(),
     phone: Joi.string().pattern(/^\+254\d{9}$/).required(),
     amount: Joi.number().positive().required(),
-    type: Joi.string().optional()
+    type: Joi.string().valid("BET_PLACED").default("BET_PLACED")
 });
 
 const newPartnerUserSchema = Joi.object({

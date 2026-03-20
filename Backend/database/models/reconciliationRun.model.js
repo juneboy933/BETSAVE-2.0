@@ -35,6 +35,25 @@ const reconciliationRunSchema = new mongoose.Schema({
         index: true
     },
 
+    source: {
+        type: String,
+        default: "SAFARICOM_PAYBILL",
+        index: true
+    },
+
+    batchReference: {
+        type: String,
+        trim: true,
+        default: null,
+        index: true
+    },
+
+    settlementAccount: {
+        type: String,
+        trim: true,
+        default: null
+    },
+
     status: {
         type: String,
         required: true,
@@ -54,6 +73,30 @@ const reconciliationRunSchema = new mongoose.Schema({
         default: 0
     },
 
+    matchedTransactions: {
+        type: Number,
+        required: true,
+        default: 0
+    },
+
+    settledTransactions: {
+        type: Number,
+        required: true,
+        default: 0
+    },
+
+    duplicateTransactions: {
+        type: Number,
+        required: true,
+        default: 0
+    },
+
+    unmatchedTransactions: {
+        type: Number,
+        required: true,
+        default: 0
+    },
+
     variance: {
         type: Number,
         required: true,
@@ -63,10 +106,16 @@ const reconciliationRunSchema = new mongoose.Schema({
     discrepancies: {
         type: [discrepancySchema],
         default: []
+    },
+
+    metadata: {
+        type: Object,
+        default: {}
     }
 }, { timestamps: true });
 
 reconciliationRunSchema.index({ runDate: 1, createdAt: -1 });
+reconciliationRunSchema.index({ source: 1, createdAt: -1 });
 
 const ReconciliationRun = mongoose.model("ReconciliationRun", reconciliationRunSchema);
 

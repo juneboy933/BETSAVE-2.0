@@ -25,7 +25,7 @@ export const setApiBase = (value) => {
 let partnerToken = "";
 
 export const setPartnerToken = (token) => {
-  partnerToken = String(token || "").trim();
+  partnerToken = "";
   markPartnerSessionActive();
 };
 export const markPartnerSessionActive = () => {
@@ -44,6 +44,9 @@ const isPartnerDashboardRequest = (path) => {
 const sanitizePartnerHeaders = (headers) => {
   const normalizedHeaders = new Headers(headers || {});
   normalizedHeaders.delete("Authorization");
+  normalizedHeaders.delete("x-api-key");
+  normalizedHeaders.delete("x-signature");
+  normalizedHeaders.delete("x-timestamp");
   return normalizedHeaders;
 };
 
@@ -105,7 +108,7 @@ async function parseResponse(response, context = {}) {
     const error = new Error(data.reason || data.error || "Request failed");
     error.code = data.code || null;
     error.details = data.details || null;
-    error.providerResponse = data.providerResponse || null;
+    error.provider = data.provider || null;
     error.status = response.status;
     throw error;
   }
@@ -136,10 +139,7 @@ export async function registerPartnerAuth({ name, email, password, webhookUrl })
     })
   });
 
-  // Store token for future requests
-  if (result.token) {
-    setPartnerToken(result.token);
-  }
+  setPartnerToken("");
 
   // Store partner info
   if (result.partner?.name) {
@@ -170,10 +170,7 @@ export async function loginPartnerAuth({ email, password }) {
     })
   });
 
-  // Store token for future requests
-  if (result.token) {
-    setPartnerToken(result.token);
-  }
+  setPartnerToken("");
 
   // Store partner info if returned
   if (result.partner?.name) {

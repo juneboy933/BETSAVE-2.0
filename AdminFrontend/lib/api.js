@@ -23,7 +23,7 @@ export const setApiBase = (value) => {
 };
 export const getAdminToken = () => adminDashboardToken;
 export const setAdminToken = (token) => {
-  adminDashboardToken = String(token || "").trim();
+  adminDashboardToken = "";
   markAdminSessionActive();
 };
 export const markAdminSessionActive = () => {

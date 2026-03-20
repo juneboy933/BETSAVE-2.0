@@ -127,6 +127,7 @@ export default function AdminDashboardAccessPage() {
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
           Existing admins create a one-time code here, send that code to the invited admin through your normal secure
           channel, and the invited admin completes registration on the admin <span className="font-semibold">/register</span> page.
+          The full code is shown only once at creation time.
         </p>
         {error ? <p className="mt-3 text-sm font-semibold text-rose-700">{error}</p> : null}
         {copyMessage ? <p className="mt-2 text-sm font-semibold text-emerald-700">{copyMessage}</p> : null}
@@ -194,7 +195,9 @@ export default function AdminDashboardAccessPage() {
             <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-wide text-slate-500">Registration Route</p>
               <p className="mt-2 font-semibold text-slate-950">{createdInvitation.registerPath || "/register"}</p>
-              <p className="mt-2 text-sm text-slate-600">{createdInvitation.notes}</p>
+              <p className="mt-2 text-sm text-slate-600">
+                Invite {createdInvitation.invitedEmail} before {createdInvitation.expiresAt ? new Date(createdInvitation.expiresAt).toLocaleString() : "expiry"}.
+              </p>
             </article>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -218,6 +221,7 @@ export default function AdminDashboardAccessPage() {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Masked Code</th>
+                <th>Status</th>
                 <th>Expires</th>
                 <th>Action</th>
               </tr>
@@ -228,6 +232,7 @@ export default function AdminDashboardAccessPage() {
                   <td>{invitation.invitedName}</td>
                   <td>{invitation.invitedEmail}</td>
                   <td className="font-mono text-xs">{invitation.code}</td>
+                  <td>{invitation.status}</td>
                   <td>{invitation.expiresAt ? new Date(invitation.expiresAt).toLocaleString() : "-"}</td>
                   <td>
                     <button className="btn-secondary" onClick={() => revokeInvitation(invitation.id)}>
@@ -238,7 +243,7 @@ export default function AdminDashboardAccessPage() {
               ))}
               {pendingInvitations.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center text-slate-500">
+                  <td colSpan={6} className="text-center text-slate-500">
                     No pending invitations.
                   </td>
                 </tr>
@@ -259,6 +264,7 @@ export default function AdminDashboardAccessPage() {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Masked Code</th>
+                <th>Status</th>
                 <th>Used</th>
               </tr>
             </thead>
@@ -268,12 +274,13 @@ export default function AdminDashboardAccessPage() {
                   <td>{invitation.invitedName}</td>
                   <td>{invitation.invitedEmail}</td>
                   <td className="font-mono text-xs">{invitation.code}</td>
+                  <td>{invitation.status}</td>
                   <td>{invitation.usedAt ? new Date(invitation.usedAt).toLocaleString() : "-"}</td>
                 </tr>
               ))}
               {usedInvitations.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="text-center text-slate-500">
+                  <td colSpan={5} className="text-center text-slate-500">
                     No used invitations.
                   </td>
                 </tr>

@@ -5,9 +5,21 @@ import PartnerUser from "../../database/models/partnerUser.model.js";
 import User from "../../database/models/user.model.js";
 import { sendOTP, verifyOTP } from "../../service/otp.service.js";
 import crypto from "crypto";
+import { sanitizeStructuredData, summarizeUrlForDisplay } from "../../service/redaction.service.js";
 
 const CREDENTIALS_SECURITY_NOTICE =
     "Store your API key and API secret securely in your backend secret manager. Do not expose them in client-side code.";
+const HTTPS_URL_REGEX = /^https:\/\//i;
+const summarizeOtpProviderResponse = (providerResponse) => {
+    const safe = sanitizeStructuredData(providerResponse || {});
+    return safe && typeof safe === "object"
+        ? {
+            status: safe.status || null,
+            statusCode: safe.statusCode || safe.code || null,
+            transactionId: safe.transactionId || safe.requestId || safe.id || null
+        }
+        : null;
+};
 
 export const createPartner = async (req, res) => {
     try {
@@ -215,6 +227,31 @@ export const setPartnerOperatingMode = async (req, res) => {
             });
         }
 
+        if (requestedMode === "live") {
+            const existingPartner = await Partner.findById(req.partner.id)
+                .select("_id webhookUrl");
+            if (!existingPartner) {
+                return res.status(404).json({
+                    status: "FAILED",
+                    reason: "Partner not found"
+                });
+            }
+
+            if (!String(existingPartner.webhookUrl || "").trim()) {
+                return res.status(400).json({
+                    status: "FAILED",
+                    reason: "Partner must configure a webhookUrl before switching to live mode"
+                });
+            }
+
+            if (!HTTPS_URL_REGEX.test(String(existingPartner.webhookUrl || "").trim())) {
+                return res.status(400).json({
+                    status: "FAILED",
+                    reason: "Partner webhookUrl must use HTTPS before switching to live mode"
+                });
+            }
+        }
+
         const partner = await Partner.findByIdAndUpdate(
             req.partner.id,
             { $set: { operatingMode: requestedMode } },
@@ -290,10 +327,10 @@ export const registerUserFromPartner = async (req, res) => {
                     tlsServername: otp.tlsServername || null,
                     providerHttpStatus: otp.providerHttpStatus || null,
                     providerStatusCode: otp.providerStatusCode || null,
-                    providerResponse: otp.providerResponse || null
+                    provider: summarizeOtpProviderResponse(otp.providerResponse)
                 });
             }
-            otpProviderResponse = otp.providerResponse || null;
+            otpProviderResponse = summarizeOtpProviderResponse(otp.providerResponse);
         }
 
         const structuredOtp = result.requiresOtp
@@ -307,11 +344,8 @@ export const registerUserFromPartner = async (req, res) => {
                     ? {
                         status: otpProviderResponse.status || null,
                         statusCode: otpProviderResponse.statusCode || null,
-                        reason: otpProviderResponse.reason || null,
                         transactionId: otpProviderResponse.transactionId || null,
-                        mobile: otpProviderResponse.mobile || null,
-                        requestTime: otpProviderResponse.requestTime || null,
-                        raw: otpProviderResponse
+                        deliveryHost: summarizeUrlForDisplay(process.env.CRADLEVOICE_SMS_URL || process.env.CRADLEVOICE_URL || null)
                     }
                     : null
             }
@@ -328,7 +362,6 @@ export const registerUserFromPartner = async (req, res) => {
             status: "SUCCESS",
             ...result,
             otpSent: result.requiresOtp,
-            otpProviderResponse,
             otp: structuredOtp
         });
     } catch (error) {

@@ -7,6 +7,13 @@ import { runInTransaction } from "../../service/databaseSession.service.js";
 const KENYA_PHONE_REGEX = /^\+254\d{9}$/;
 
 export const registerUser = async (req, res) => {
+  if (!env.USER_SELF_REGISTRATION_ENABLED) {
+    return res.status(403).json({
+      success: false,
+      error: "Public user self-registration is disabled",
+    });
+  }
+
   const { phone } = req.body;
   const normalizePhone = phone?.trim();
 

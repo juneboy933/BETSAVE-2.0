@@ -6,6 +6,10 @@ import { request } from "../../../lib/api";
 import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function AdminDashboardPartners() {
+  const statusTone = (status) =>
+    String(status || "").toUpperCase() === "ACTIVE"
+      ? "bg-emerald-50 text-emerald-800"
+      : "bg-rose-50 text-rose-800";
   const router = useRouter();
   const [partners, setPartners] = useState([]);
   const [error, setError] = useState("");
@@ -63,8 +67,11 @@ export default function AdminDashboardPartners() {
 
   return (
     <article className="card space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Partner Governance</h2>
+      <div className="section-head">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Partners</p>
+          <h2 className="mt-2 text-2xl font-bold text-slate-950">Partner governance</h2>
+        </div>
         <button className="btn" onClick={refresh}>
           Refresh
         </button>
@@ -124,8 +131,23 @@ export default function AdminDashboardPartners() {
               <tr key={p._id}>
                 <td className="mono text-xs">{p._id}</td>
                 <td>{p.name}</td>
-                <td>{p.status}</td>
-                <td>{p.webhookUrl || "-"}</td>
+                <td>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusTone(p.status)}`}>
+                    {p.status}
+                  </span>
+                </td>
+                <td>
+                  {p.webhookConfigured ? (
+                    <div className="space-y-1">
+                      <p className="text-sm text-slate-900">{p.webhookHost || "Configured"}</p>
+                      <p className={`text-xs font-medium ${p.webhookSecure ? "text-emerald-700" : "text-rose-700"}`}>
+                        {p.webhookSecure ? "HTTPS" : "Non-HTTPS"}
+                      </p>
+                    </div>
+                  ) : (
+                    "-"
+                  )}
+                </td>
                 <td>{p.stats?.totalEvents || 0}</td>
                 <td>{p.stats?.totalAmount || 0}</td>
                 <td>{p.stats?.totalSavings || 0}</td>

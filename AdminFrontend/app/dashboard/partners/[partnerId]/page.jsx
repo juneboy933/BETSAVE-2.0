@@ -6,6 +6,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getAdminToken, request } from "../../../../lib/api";
 
 export default function AdminPartnerManagePage() {
+  const statusTone = (status) =>
+    String(status || "").toUpperCase() === "ACTIVE"
+      ? "bg-emerald-50 text-emerald-800"
+      : "bg-rose-50 text-rose-800";
   const params = useParams();
   const partnerId = useMemo(() => String(params?.partnerId || ""), [params]);
 
@@ -68,8 +72,11 @@ export default function AdminPartnerManagePage() {
   return (
     <section className="space-y-4">
       <article className="card">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-bold">Partner Management</h2>
+        <div className="section-head">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Partner Detail</p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-950">Partner management</h2>
+          </div>
           <div className="flex gap-2">
             <button className="btn-secondary" onClick={load}>
               Refresh
@@ -92,7 +99,9 @@ export default function AdminPartnerManagePage() {
               </article>
               <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs uppercase text-slate-500">Status</p>
-                <p className="text-sm font-bold text-slate-900">{data.partner?.status || "-"}</p>
+                <p className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusTone(data.partner?.status)}`}>
+                  {data.partner?.status || "-"}
+                </p>
               </article>
               <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <p className="text-xs uppercase text-slate-500">Linked Users</p>
@@ -107,8 +116,11 @@ export default function AdminPartnerManagePage() {
             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs uppercase text-slate-500">Partner ID</p>
               <p className="font-mono text-xs text-slate-900">{data.partner?._id || "-"}</p>
-              <p className="mt-2 text-xs uppercase text-slate-500">Webhook URL</p>
-              <p className="text-sm text-slate-900">{data.partner?.webhookUrl || "-"}</p>
+              <p className="mt-2 text-xs uppercase text-slate-500">Webhook Endpoint</p>
+              <p className="text-sm text-slate-900">{data.partner?.webhookHost || "-"}</p>
+              <p className={`mt-1 text-xs font-medium ${data.partner?.webhookSecure ? "text-emerald-700" : "text-slate-500"}`}>
+                {data.partner?.webhookConfigured ? (data.partner?.webhookSecure ? "HTTPS verified" : "Configured but not HTTPS") : "Not configured"}
+              </p>
             </div>
 
             <div className="mt-4 grid gap-2 md:grid-cols-4">

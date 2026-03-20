@@ -9,6 +9,7 @@ import {
 } from "./eventReference.service.js";
 import { finalizeEvent } from "./eventFinalization.service.js";
 import { buildSignedCallbackUrl } from "./paymentCallbackSecurity.service.js";
+import { recordOperationalLogSafe } from "./operationalLog.service.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -36,6 +37,24 @@ export const processEvent = async (eventId, partnerName, requestedOperatingMode 
     );
 
     if (!event) return { status: 'FAILED', reason: 'Event not found or already processed' };
+
+    await recordOperationalLogSafe({
+        category: "EVENT",
+        action: "EVENT_PROCESSING_STARTED",
+        level: "INFO",
+        status: "PROCESSING",
+        message: `Started processing bet placed event ${event.eventId}`,
+        targetType: "EVENT",
+        targetId: String(event._id),
+        partnerName: event.partnerName,
+        operatingMode: event.operatingMode,
+        userId: event.userId,
+        eventId: event.eventId,
+        metadata: {
+            amount: event.amount,
+            phone: event.phone
+        }
+    });
 
     try {
         if (!event.amount || event.amount <= 0) throw new Error('Invalid event amount');
@@ -81,6 +100,26 @@ export const processEvent = async (eventId, partnerName, requestedOperatingMode 
         event.paymentTransactionId = paymentTransaction._id;
         await event.save();
 
+        await recordOperationalLogSafe({
+            category: "PAYMENT",
+            action: "EVENT_DEPOSIT_CREATED",
+            level: "INFO",
+            status: paymentTransaction.status,
+            message: `Created savings collection transaction for event ${event.eventId}`,
+            targetType: "PAYMENT_TRANSACTION",
+            targetId: String(paymentTransaction._id),
+            partnerName,
+            operatingMode,
+            userId: event.userId,
+            eventId: event.eventId,
+            paymentTransactionId: paymentTransaction._id,
+            externalRef,
+            metadata: {
+                amount: paymentTransaction.amount,
+                idempotencyKey
+            }
+        });
+
         if (!isDarajaCollectionEnabled()) {
             throw new Error("Daraja collection is not configured for event-driven STK processing");
         }
@@ -103,7 +142,29 @@ export const processEvent = async (eventId, partnerName, requestedOperatingMode 
                 providerAck.checkoutRequestId || paymentTransaction.providerRequestId;
             paymentTransaction.providerTransactionId =
                 providerAck.merchantRequestId || paymentTransaction.providerTransactionId;
+            paymentTransaction.providerResponse = providerAck.raw || paymentTransaction.providerResponse;
             await paymentTransaction.save();
+
+            await recordOperationalLogSafe({
+                category: "PAYMENT",
+                action: "DARAJA_STK_PUSH_ACCEPTED",
+                level: "INFO",
+                status: paymentTransaction.status,
+                message: `Daraja accepted STK push for event ${event.eventId}`,
+                targetType: "PAYMENT_TRANSACTION",
+                targetId: String(paymentTransaction._id),
+                partnerName,
+                operatingMode,
+                userId: event.userId,
+                eventId: event.eventId,
+                paymentTransactionId: paymentTransaction._id,
+                externalRef,
+                metadata: {
+                    providerRequestId: paymentTransaction.providerRequestId,
+                    providerTransactionId: paymentTransaction.providerTransactionId,
+                    providerResponse: providerAck.raw || null
+                }
+            });
         }
 
         return {
@@ -115,6 +176,23 @@ export const processEvent = async (eventId, partnerName, requestedOperatingMode 
         };
 
     } catch (error) {
+        await recordOperationalLogSafe({
+            category: "EVENT",
+            action: "EVENT_PROCESSING_FAILED",
+            level: "ERROR",
+            status: "FAILED",
+            message: `Failed processing bet placed event ${event.eventId}: ${error.message}`,
+            targetType: "EVENT",
+            targetId: String(event._id),
+            partnerName,
+            operatingMode: event.operatingMode,
+            userId: event.userId,
+            eventId: event.eventId,
+            paymentTransactionId: event.paymentTransactionId || null,
+            metadata: {
+                error: error.message
+            }
+        });
         await finalizeEvent({
             event,
             nextStatus: "FAILED",

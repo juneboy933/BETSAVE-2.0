@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const getEnv = (key) => String(process.env[key] || "").trim();
+const isHttpsUrl = (value) => /^https:\/\//i.test(String(value || "").trim());
 
 const parseBoolean = (value, defaultValue = true) => {
     if (value === undefined || value === null || String(value).trim() === "") {
@@ -63,6 +64,29 @@ export const validatePaymentConfiguration = () => {
 
     if (!getEnv("PAYMENT_CALLBACK_TOKEN")) {
         throw new Error("PAYMENT_CALLBACK_TOKEN is required when payments are enabled");
+    }
+
+    const bankApiUrlConfigured = Boolean(getEnv("BANK_API_URL"));
+    const bankApiKeyConfigured = Boolean(getEnv("BANK_API_KEY"));
+    if (bankApiUrlConfigured !== bankApiKeyConfigured) {
+        throw new Error("BANK_API_URL and BANK_API_KEY must be configured together");
+    }
+
+    if (depositsEnabled && !getEnv("BANK_SETTLEMENT_ACCOUNT")) {
+        throw new Error("BANK_SETTLEMENT_ACCOUNT is required when deposits are enabled");
+    }
+
+    if (env === "production") {
+        const productionUrls = [
+            depositsEnabled ? "DARAJA_STK_CALLBACK_URL" : null,
+            withdrawalsEnabled ? "DARAJA_B2C_TIMEOUT_URL" : null,
+            withdrawalsEnabled ? "DARAJA_B2C_RESULT_URL" : null
+        ].filter(Boolean);
+
+        const insecureUrls = productionUrls.filter((key) => !isHttpsUrl(getEnv(key)));
+        if (insecureUrls.length) {
+            throw new Error(`Production payment callbacks must use HTTPS: ${insecureUrls.join(", ")}`);
+        }
     }
 
     return {

@@ -1,4 +1,5 @@
 import { createLogger, format, transports } from 'winston';
+import { sanitizeLogMetadata } from "../service/redaction.service.js";
 
 // simple console logger with timestamp and level
 const logger = createLogger({
@@ -7,8 +8,9 @@ const logger = createLogger({
         format.timestamp(),
         format.printf(({ timestamp, level, message, ...meta }) => {
             let msg = `${timestamp} [${level.toUpperCase()}] ${message}`;
-            if (Object.keys(meta).length) {
-                msg += ` ${JSON.stringify(meta)}`;
+            const safeMeta = sanitizeLogMetadata(meta);
+            if (Object.keys(safeMeta || {}).length) {
+                msg += ` ${JSON.stringify(safeMeta)}`;
             }
             return msg;
         })

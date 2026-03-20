@@ -3,6 +3,8 @@ import Ledger from "../../database/models/ledger.model.js";
 import PaymentTransaction from "../../database/models/paymentTransaction.model.js";
 import PartnerNotification from "../../database/models/partnerNotification.model.js";
 import PartnerUser from "../../database/models/partnerUser.model.js";
+import { finalizeEvent } from "../../service/eventFinalization.service.js";
+import { deriveEffectiveEventState } from "../../service/eventStatus.service.js";
 
 const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -31,17 +33,92 @@ export const getPartnerEvents = async (req, res) => {
         const page = Math.max(1, Number(req.query.page) || 1);
         const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
 
-        const query = { partnerName: name, operatingMode };
-        if (status) query.status = status;
+        const basePipeline = [
+            { $match: { partnerName: name, operatingMode } },
+            {
+                $lookup: {
+                    from: "paymenttransactions",
+                    localField: "paymentTransactionId",
+                    foreignField: "_id",
+                    as: "paymentTransaction"
+                }
+            },
+            {
+                $unwind: {
+                    path: "$paymentTransaction",
+                    preserveNullAndEmptyArrays: true
+                }
+            },
+            {
+                $addFields: {
+                    rawStatus: "$status",
+                    paymentStatus: "$paymentTransaction.status",
+                    status: {
+                        $switch: {
+                            branches: [
+                                { case: { $eq: ["$status", "PROCESSED"] }, then: "PROCESSED" },
+                                { case: { $eq: ["$status", "FAILED"] }, then: "FAILED" },
+                                { case: { $eq: ["$paymentTransaction.status", "SUCCESS"] }, then: "PROCESSED" },
+                                { case: { $eq: ["$paymentTransaction.status", "FAILED"] }, then: "FAILED" },
+                                {
+                                    case: {
+                                        $in: [
+                                            "$paymentTransaction.status",
+                                            ["PENDING", "INITIATED"]
+                                        ]
+                                    },
+                                    then: "PROCESSING"
+                                }
+                            ],
+                            default: "$status"
+                        }
+                    }
+                }
+            }
+        ];
 
-        const [events, total] = await Promise.all([
-            Event.find(query)
-                .sort({ createdAt: -1 })
-                .skip((page - 1) * limit)
-                .limit(Number(limit))
-                .lean(),
-            Event.countDocuments(query)
+        if (status) {
+            basePipeline.push({ $match: { status } });
+        }
+
+        const [events, totalResult] = await Promise.all([
+            Event.aggregate([
+                ...basePipeline,
+                { $sort: { createdAt: -1 } },
+                { $skip: (page - 1) * limit },
+                { $limit: Number(limit) }
+            ]),
+            Event.aggregate([
+                ...basePipeline,
+                { $count: "total" }
+            ])
         ]);
+        const total = Number(totalResult[0]?.total || 0);
+
+        const finalizePromises = events
+            .map((event) => {
+                const state = deriveEffectiveEventState({
+                    event,
+                    paymentTransaction: event.paymentTransaction || null
+                });
+
+                if (!state.shouldFinalize) {
+                    return null;
+                }
+
+                return finalizeEvent({
+                    eventId: event.eventId,
+                    partnerName: event.partnerName,
+                    operatingMode: event.operatingMode,
+                    userId: event.userId,
+                    paymentTransaction: event.paymentTransaction,
+                    nextStatus: state.nextStatus,
+                    failureReason: state.statusReason,
+                    notifyPartner: true
+                }).catch(() => null);
+            })
+            .filter(Boolean);
+        await Promise.all(finalizePromises);
 
         const eventIds = events.map((e) => e.eventId);
         const savingsByEvent = eventIds.length
@@ -53,15 +130,23 @@ export const getPartnerEvents = async (req, res) => {
 
         const savingsMap = new Map(savingsByEvent.map((x) => [x._id, clampNonNegative(x.savingsAmount)]));
         const enrichedEvents = events.map((event) => {
+            const state = deriveEffectiveEventState({
+                event,
+                paymentTransaction: event.paymentTransaction || null
+            });
             const fallbackSavings =
-                event.status === "PROCESSED"
+                state.effectiveStatus === "PROCESSED"
                     ? clampNonNegative(Math.round((event.amount || 0) * safeSavingsPercentage))
                     : 0;
             const rawSavings = savingsMap.get(event.eventId) ?? fallbackSavings;
 
             return {
                 ...event,
-                savingsAmount: normalizeProcessedSavings(event, rawSavings)
+                rawStatus: state.rawStatus,
+                status: state.effectiveStatus,
+                paymentStatus: state.paymentStatus,
+                statusReason: state.statusReason,
+                savingsAmount: normalizeProcessedSavings({ ...event, status: state.effectiveStatus }, rawSavings)
             };
         });
 

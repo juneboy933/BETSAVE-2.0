@@ -26,6 +26,7 @@ const envSchema = Joi.object({
     // user authentication
     USER_JWT_SECRET: Joi.string().min(32).required(),
     USER_JWT_EXPIRATION: Joi.string().default('7d'),
+    USER_SELF_REGISTRATION_ENABLED: Joi.boolean().truthy("true", "1", "yes", "on").falsy("false", "0", "no", "off").default(false),
 
 
     // external services
@@ -39,6 +40,7 @@ const envSchema = Joi.object({
     STALE_PROCESSING_EVENT_MS: Joi.number().integer().min(1000).default(10 * 60 * 1000),
     STALE_INITIATED_PAYMENT_MS: Joi.number().integer().min(1000).default(5 * 60 * 1000),
     STALE_PENDING_PAYMENT_MS: Joi.number().integer().min(1000).default(30 * 60 * 1000),
+    STALE_SETTLEMENT_MS: Joi.number().integer().min(1000).default(24 * 60 * 60 * 1000),
     RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(15 * 60 * 1000),
     RATE_LIMIT_MAX: Joi.number().integer().min(1).default(200),
 

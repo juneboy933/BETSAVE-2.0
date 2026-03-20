@@ -11,6 +11,7 @@ import {
     getAdminNotifications,
     getAdminSavings,
     getAdminOperations,
+    runAdminSettlementReconciliation,
     markAdminNotificationsRead,
     suspendUser,
     updatePartnerStatus
@@ -31,6 +32,7 @@ router.get("/notifications/summary", getAdminNotificationSummary);
 router.patch("/notifications/read-all", markAdminNotificationsRead);
 router.get("/savings", getAdminSavings);
 router.get("/operations", getAdminOperations);
+router.post("/operations/reconciliation-runs", runAdminSettlementReconciliation);
 router.patch("/partners/:partnerId/status", updatePartnerStatus);
 router.patch("/users/:userId/suspend", suspendUser);
 router.patch("/users/:userId/activate", activateUser);

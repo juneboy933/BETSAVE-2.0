@@ -7,6 +7,7 @@ import {
     logoutPartnerAuth,
     refreshPartnerToken
 } from "../controller/partnerAuth.controller.js";
+import { partnerAuthLimiter } from "../middleware/authRateLimit.middleware.js";
 import { verifyPartnerDashboard } from "../middleware/partnerDashboardAuth.middleware.js";
 
 const router = express.Router();
@@ -24,8 +25,8 @@ const loginSchema = Joi.object({
     password: Joi.string().required()
 });
 
-router.post("/register", validateBody(registrationSchema), registerPartnerAuth);
-router.post("/login", validateBody(loginSchema), loginPartnerAuth);
+router.post("/register", partnerAuthLimiter, validateBody(registrationSchema), registerPartnerAuth);
+router.post("/login", partnerAuthLimiter, validateBody(loginSchema), loginPartnerAuth);
 router.post("/refresh", refreshPartnerToken);
 router.post("/logout", verifyPartnerDashboard, logoutPartnerAuth);
 

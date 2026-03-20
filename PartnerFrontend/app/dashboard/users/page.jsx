@@ -76,8 +76,7 @@ export default function PartnerDashboardUsers() {
       setPhone("");
       await loadUsers();
     } catch (err) {
-      const providerDetails = err.providerResponse ? ` | provider: ${JSON.stringify(err.providerResponse)}` : "";
-      setError(`${err.code ? `[${err.code}] ` : ""}${err.message}${err.details ? ` | details: ${err.details}` : ""}${providerDetails}`);
+      setError(`${err.code ? `[${err.code}] ` : ""}${err.message}${err.details ? ` | details: ${err.details}` : ""}`);
     }
   };
 
@@ -96,8 +95,7 @@ export default function PartnerDashboardUsers() {
       setOtpCode("");
       await loadUsers();
     } catch (err) {
-      const providerDetails = err.providerResponse ? ` | provider: ${JSON.stringify(err.providerResponse)}` : "";
-      setError(`${err.code ? `[${err.code}] ` : ""}${err.message}${err.details ? ` | details: ${err.details}` : ""}${providerDetails}`);
+      setError(`${err.code ? `[${err.code}] ` : ""}${err.message}${err.details ? ` | details: ${err.details}` : ""}`);
     }
   };
 

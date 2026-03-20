@@ -52,6 +52,10 @@ export default function AdminDashboardOperations() {
   const globalMetrics = ops?.operations?.global || {};
   const thresholds = ops?.operations?.thresholds || {};
   const workers = ops?.runtimeReadiness?.workers || [];
+  const observabilitySummary = ops?.observability?.summary || {};
+  const recentOperationalLogs = ops?.observability?.recentOperationalLogs || [];
+  const settlement = ops?.operations?.settlement || {};
+  const recentReconciliationRuns = ops?.observability?.recentReconciliationRuns || [];
 
   return (
     <section className="space-y-4">
@@ -154,6 +158,35 @@ export default function AdminDashboardOperations() {
       </article>
 
       <article className="card">
+        <h3 className="text-lg font-bold text-slate-950">Settlement Health</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Successful Paybill collections are not fully bank-safe until they are reconciled and posted into the bank settlement ledger.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <article className={`rounded-2xl border p-4 ${metricTone(settlement?.selectedMode?.count || 0)}`}>
+            <p className="text-xs uppercase tracking-wide">Selected mode unsettled</p>
+            <p className="mt-2 text-2xl font-bold">{String(settlement?.selectedMode?.count || 0)}</p>
+            <p className="mt-1 text-xs">KES {Number(settlement?.selectedMode?.amount || 0).toLocaleString()}</p>
+          </article>
+          <article className={`rounded-2xl border p-4 ${metricTone(settlement?.selectedMode?.staleCount || 0)}`}>
+            <p className="text-xs uppercase tracking-wide">Selected mode stale</p>
+            <p className="mt-2 text-2xl font-bold">{String(settlement?.selectedMode?.staleCount || 0)}</p>
+            <p className="mt-1 text-xs">KES {Number(settlement?.selectedMode?.staleAmount || 0).toLocaleString()}</p>
+          </article>
+          <article className={`rounded-2xl border p-4 ${metricTone(settlement?.settledLast24Hours?.count || 0)}`}>
+            <p className="text-xs uppercase tracking-wide">Settled last 24h</p>
+            <p className="mt-2 text-2xl font-bold">{String(settlement?.settledLast24Hours?.count || 0)}</p>
+            <p className="mt-1 text-xs">KES {Number(settlement?.settledLast24Hours?.totalAmount || 0).toLocaleString()}</p>
+          </article>
+          <article className={`rounded-2xl border p-4 ${metricTone(settlement?.unscoped?.count || 0)}`}>
+            <p className="text-xs uppercase tracking-wide">Unscoped unsettled</p>
+            <p className="mt-2 text-2xl font-bold">{String(settlement?.unscoped?.count || 0)}</p>
+            <p className="mt-1 text-xs">KES {Number(settlement?.unscoped?.amount || 0).toLocaleString()}</p>
+          </article>
+        </div>
+      </article>
+
+      <article className="card">
         <h3 className="text-lg font-bold text-slate-950">Integration Readiness</h3>
         <div className="table-wrap mt-4">
           <table className="table">
@@ -229,6 +262,111 @@ export default function AdminDashboardOperations() {
                 <tr>
                   <td colSpan={6} className="text-center text-slate-500">
                     No worker runtime data loaded.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="card">
+        <h3 className="text-lg font-bold text-slate-950">Operational Activity</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          This is the structured audit trail for event ingestion, Daraja payment requests, callbacks, webhooks, and recovery cycles.
+        </p>
+        <p className="mt-1 text-xs font-medium text-slate-500">
+          Severity counts cover activity since {asDateTime(observabilitySummary.windowStartedAt)}.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Info logs</p>
+            <p className="mt-2 text-2xl font-bold text-slate-950">{Number(observabilitySummary.info) || 0}</p>
+          </article>
+          <article className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-xs uppercase tracking-wide text-amber-800">Warnings</p>
+            <p className="mt-2 text-2xl font-bold text-amber-900">{Number(observabilitySummary.warn) || 0}</p>
+          </article>
+          <article className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+            <p className="text-xs uppercase tracking-wide text-rose-800">Errors</p>
+            <p className="mt-2 text-2xl font-bold text-rose-900">{Number(observabilitySummary.error) || 0}</p>
+          </article>
+        </div>
+        <div className="table-wrap mt-4">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Level</th>
+                <th>Category</th>
+                <th>Action</th>
+                <th>Status</th>
+                <th>Message</th>
+                <th>Partner</th>
+                <th>Event / Payment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentOperationalLogs.map((item) => (
+                <tr key={item._id}>
+                  <td>{asDateTime(item.createdAt)}</td>
+                  <td>{item.level || "-"}</td>
+                  <td>{item.category || "-"}</td>
+                  <td>{item.action || "-"}</td>
+                  <td>{item.status || "-"}</td>
+                  <td>{item.message || "-"}</td>
+                  <td>{item.partnerName || "-"}</td>
+                  <td>{item.eventId || item.paymentTransactionId || item.withdrawalRequestId || "-"}</td>
+                </tr>
+              ))}
+              {!recentOperationalLogs.length ? (
+                <tr>
+                  <td colSpan={8} className="text-center text-slate-500">
+                    No operational activity logs loaded.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="card">
+        <h3 className="text-lg font-bold text-slate-950">Recent Reconciliation Runs</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          These runs show whether Paybill settlement batches actually matched successful deposits or exposed accounting gaps.
+        </p>
+        <div className="table-wrap mt-4">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Batch</th>
+                <th>Settled</th>
+                <th>Duplicates</th>
+                <th>Unmatched</th>
+                <th>Variance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentReconciliationRuns.map((run) => (
+                <tr key={run._id}>
+                  <td>{asDateTime(run.createdAt)}</td>
+                  <td>{run.status || "-"}</td>
+                  <td>{run.source || "-"}</td>
+                  <td>{run.batchReference || "-"}</td>
+                  <td>{run.settledTransactions || 0}</td>
+                  <td>{run.duplicateTransactions || 0}</td>
+                  <td>{run.unmatchedTransactions || 0}</td>
+                  <td>{Number(run.variance || 0).toLocaleString()}</td>
+                </tr>
+              ))}
+              {!recentReconciliationRuns.length ? (
+                <tr>
+                  <td colSpan={8} className="text-center text-slate-500">
+                    No reconciliation runs loaded.
                   </td>
                 </tr>
               ) : null}

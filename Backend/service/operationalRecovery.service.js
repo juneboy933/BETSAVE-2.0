@@ -5,6 +5,7 @@ import { finalizeEvent } from "./eventFinalization.service.js";
 import { buildEventExternalRef, parseEventReference } from "./eventReference.service.js";
 import { failDeposit } from "./paymentCollection.service.js";
 import { markWithdrawalFailed } from "./paymentWithdrawal.service.js";
+import { recordOperationalLogSafe } from "./operationalLog.service.js";
 
 const parsePositiveNumber = (value, fallback) => {
     const numeric = Number(value);
@@ -15,6 +16,7 @@ const RECOVERY_BATCH_SIZE = () => parsePositiveNumber(process.env.RECOVERY_BATCH
 const STALE_PROCESSING_EVENT_MS = () => parsePositiveNumber(process.env.STALE_PROCESSING_EVENT_MS, 10 * 60 * 1000);
 const STALE_INITIATED_PAYMENT_MS = () => parsePositiveNumber(process.env.STALE_INITIATED_PAYMENT_MS, 5 * 60 * 1000);
 const STALE_PENDING_PAYMENT_MS = () => parsePositiveNumber(process.env.STALE_PENDING_PAYMENT_MS, 30 * 60 * 1000);
+const STALE_SETTLEMENT_MS = () => parsePositiveNumber(process.env.STALE_SETTLEMENT_MS, 24 * 60 * 60 * 1000);
 
 const resolveLinkedDepositTransaction = async (event) => {
     if (event.paymentTransactionId) {
@@ -153,11 +155,13 @@ const failStaleInitiatedWithdrawals = async (now) => {
 
 const getStalePendingCounts = async (now) => {
     const staleBefore = new Date(now - STALE_PENDING_PAYMENT_MS());
+    const staleSettlementBefore = new Date(now - STALE_SETTLEMENT_MS());
 
     const [
         stalePendingDeposits,
         stalePendingWithdrawals,
-        staleProcessingEvents
+        staleProcessingEvents,
+        staleUnsettledDeposits
     ] = await Promise.all([
         PaymentTransaction.countDocuments({
             type: "DEPOSIT",
@@ -172,13 +176,20 @@ const getStalePendingCounts = async (now) => {
         Event.countDocuments({
             status: "PROCESSING",
             updatedAt: { $lt: staleBefore }
+        }),
+        PaymentTransaction.countDocuments({
+            type: "DEPOSIT",
+            status: "SUCCESS",
+            settlementStatus: "PENDING",
+            updatedAt: { $lt: staleSettlementBefore }
         })
     ]);
 
     return {
         stalePendingDeposits,
         stalePendingWithdrawals,
-        staleProcessingEvents
+        staleProcessingEvents,
+        staleUnsettledDeposits
     };
 };
 
@@ -188,11 +199,32 @@ export const runOperationalRecovery = async () => {
     const failedInitiatedWithdrawals = await failStaleInitiatedWithdrawals(now);
     const eventRecovery = await recoverStaleProcessingEvents(now);
     const stalePending = await getStalePendingCounts(now);
-
-    return {
+    const result = {
         eventRecovery,
         failedInitiatedDeposits,
         failedInitiatedWithdrawals,
         ...stalePending
     };
+
+    await recordOperationalLogSafe({
+        category: "RECOVERY",
+        action: "RECOVERY_CYCLE_COMPLETED",
+        level:
+            failedInitiatedDeposits > 0 ||
+            failedInitiatedWithdrawals > 0 ||
+            stalePending.stalePendingDeposits > 0 ||
+            stalePending.stalePendingWithdrawals > 0 ||
+            stalePending.staleUnsettledDeposits > 0 ||
+            stalePending.staleProcessingEvents > 0 ||
+            eventRecovery.finalizedFailed > 0
+                ? "WARN"
+                : "INFO",
+        status: "COMPLETED",
+        message: "Operational recovery cycle completed",
+        targetType: "RECOVERY_CYCLE",
+        targetId: new Date(now).toISOString(),
+        metadata: result
+    });
+
+    return result;
 };

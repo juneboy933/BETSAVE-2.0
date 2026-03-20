@@ -14,3 +14,12 @@ export const generateInvitationCode = () => {
 
 export const hashToken = (token) =>
     crypto.createHash("sha256").update(token).digest("hex");
+
+export const buildInvitationCodePreview = (code) => {
+    const normalizedCode = String(code || "").trim();
+    if (normalizedCode.length <= 12) {
+        return normalizedCode;
+    }
+
+    return `${normalizedCode.slice(0, 6)}...${normalizedCode.slice(-4)}`;
+};

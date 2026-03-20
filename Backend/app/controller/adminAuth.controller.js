@@ -1,6 +1,7 @@
 import Admin from "../../database/models/admin.model.js";
 import AdminInvitation from "../../database/models/adminInvitation.model.js";
 import {
+    buildInvitationCodePreview,
     generateAdminToken,
     generateInvitationCode,
     generateSalt,
@@ -15,6 +16,8 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INVITATION_VALID_HOURS = 48; // Invitations valid for 48 hours
 const ADMIN_COOKIE_NAME = "betsave_admin_session";
 const ADMIN_SESSION_MAX_AGE_SECONDS = Number(env.ADMIN_TOKEN_TTL_HOURS || 12) * 60 * 60;
+const PASSWORD_MIN_LENGTH = 12;
+const PASSWORD_COMPLEXITY_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/;
 
 const attachAdminSessionCookie = (res, token) => {
     res.setHeader("Set-Cookie", buildSessionCookie({
@@ -29,6 +32,19 @@ const denyInvitationManagement = (res) =>
         status: "FAILED",
         reason: "Only the primary admin can manage admin invitations"
     });
+
+const validateAdminPassword = (password) => {
+    const normalizedPassword = String(password || "");
+    if (normalizedPassword.length < PASSWORD_MIN_LENGTH) {
+        return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
+    }
+
+    if (!PASSWORD_COMPLEXITY_REGEX.test(normalizedPassword)) {
+        return "Password must include uppercase, lowercase, and numeric characters";
+    }
+
+    return null;
+};
 
 /**
  * CREATE ADMIN INVITATION (Admin-only)
@@ -88,10 +104,12 @@ export const createAdminInvitation = async (req, res) => {
         }
 
         const invitationCode = generateInvitationCode();
+        const invitationCodeHash = hashToken(invitationCode);
         const expiresAt = new Date(Date.now() + INVITATION_VALID_HOURS * 60 * 60 * 1000);
 
         const invitation = await AdminInvitation.create({
-            invitationCode,
+            invitationCodeHash,
+            invitationCodePreview: buildInvitationCodePreview(invitationCode),
             invitedEmail: normalizedEmail,
             invitedName: invitedName.trim(),
             invitedBy: req.admin.id,
@@ -135,17 +153,23 @@ export const registerAdminWithInvitation = async (req, res) => {
             });
         }
 
-        if (password.length < 8) {
+        const passwordError = validateAdminPassword(password);
+        if (passwordError) {
             return res.status(400).json({
                 status: "FAILED",
-                reason: "Password must be at least 8 characters"
+                reason: passwordError
             });
         }
 
+        const invitationCodeHash = hashToken(invitationCode.trim());
+
         // Validate that invitation exists, is pending, and not expired
         const invitation = await AdminInvitation.findOne({
-            invitationCode: invitationCode.trim(),
-            status: "PENDING"
+            status: "PENDING",
+            $or: [
+                { invitationCodeHash },
+                { invitationCode: invitationCode.trim() }
+            ]
         });
 
         if (!invitation) {
@@ -156,8 +180,7 @@ export const registerAdminWithInvitation = async (req, res) => {
         }
 
         if (new Date() > invitation.expiresAt) {
-            // Mark as expired by setting status (optional, but helps audit)
-            invitation.status = "REVOKED";
+            invitation.status = "EXPIRED";
             await invitation.save();
             return res.status(410).json({
                 status: "FAILED",
@@ -199,8 +222,7 @@ export const registerAdminWithInvitation = async (req, res) => {
                 name: admin.name,
                 email: admin.email,
                 canManageAdminInvitations
-            },
-            token: adminToken
+            }
         });
     } catch (error) {
         console.error("[registerAdminWithInvitation]", error);
@@ -266,8 +288,7 @@ export const loginAdmin = async (req, res) => {
                 name: admin.name,
                 email: admin.email,
                 canManageAdminInvitations
-            },
-            token: adminToken
+            }
         });
     } catch (error) {
         console.error("[loginAdmin]", error);
@@ -351,7 +372,7 @@ export const listAdminInvitations = async (req, res) => {
         }
 
         const invitations = await AdminInvitation.find(query)
-            .select("invitationCode invitedEmail invitedName status expiresAt createdAt usedAt")
+            .select("invitationCodePreview invitationCode invitedEmail invitedName status expiresAt createdAt usedAt")
             .sort({ createdAt: -1 })
             .limit(100);
 
@@ -362,7 +383,7 @@ export const listAdminInvitations = async (req, res) => {
                 id: inv._id,
                 invitedEmail: inv.invitedEmail,
                 invitedName: inv.invitedName,
-                code: `${inv.invitationCode.slice(0, 8)}...${inv.invitationCode.slice(-8)}`, // Partial display
+                code: inv.invitationCodePreview || buildInvitationCodePreview(inv.invitationCode),
                 status: inv.status,
                 expiresAt: inv.expiresAt,
                 usedAt: inv.usedAt,

@@ -11,6 +11,7 @@ When a partner sends a bet event, Betsave ingests it, processes it asynchronousl
 - `AdminFrontend/` Next.js admin portal (port `5182`)
 - `docker-compose.prod.yml` production-oriented Docker Compose stack with Mongo replica set bootstrap
 - `.env.production.example` deployment environment template
+- `INTEGRATION.md` partner/backend integration guide
 
 ## Core Flow
 
@@ -42,6 +43,7 @@ Signed integration requests require:
 - `x-api-key`
 - `x-timestamp`
 - `x-signature`
+- `x-integration-token` for live-mode write requests
 
 Endpoints:
 
@@ -51,7 +53,7 @@ Endpoints:
 
 ### Partner Dashboard
 
-Dashboard requests use the partner session cookie or bearer token issued during login.
+Dashboard requests use the partner session cookie issued during login.
 
 - `GET /api/v1/dashboard/partner/events`
 - `GET /api/v1/dashboard/partner/analytics`
@@ -75,7 +77,7 @@ Endpoints:
 
 Header:
 
-- `x-admin-token` or the admin session cookie
+- admin session cookie
 
 Endpoints:
 
@@ -86,6 +88,7 @@ Endpoints:
 - `GET /api/v1/dashboard/admin/events`
 - `GET /api/v1/dashboard/admin/savings`
 - `GET /api/v1/dashboard/admin/operations`
+- `POST /api/v1/dashboard/admin/operations/reconciliation-runs`
 
 Admin access routes:
 
@@ -226,7 +229,10 @@ docker compose -f docker-compose.prod.yml down -v
 - Keep API, workers, MongoDB, and Redis running under orchestration.
 - Put Nginx or Caddy in front for HTTPS and domain routing.
 - Keep API secrets in backend secret management only.
+- Set `CORS_ALLOWED_ORIGINS` explicitly in production.
 - Monitor stale pending deposits, stale pending withdrawals, and stale processing events from the admin operations view.
+- Monitor unsettled successful deposits and reconciliation runs from the admin operations view.
 - Do not rely on the browser to retain partner integration secrets.
 - Existing admins issue invitation codes from the admin dashboard Access view and send those codes to new admins through a secure out-of-band channel.
 - Only the primary admin created during bootstrap can issue, view, or revoke admin invitation codes.
+- Use `INTEGRATION.md` as the implementation guide for partner backend teams.

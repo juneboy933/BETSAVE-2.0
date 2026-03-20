@@ -112,6 +112,7 @@ export const verifyPartner = async (req, res, next) => {
             name: partner.name,
             operatingMode: partner.operatingMode || "demo",
         };
+        req.partnerAuthMethod = "signature";
 
         if (!encryptedApiSecret && legacyApiSecret) {
             Partner.updateOne(

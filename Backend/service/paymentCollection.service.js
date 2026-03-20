@@ -1,5 +1,7 @@
 import PaymentTransaction from "../database/models/paymentTransaction.model.js";
 import { postLedger } from "./postLedger.service.js";
+import { runInTransaction } from "./databaseSession.service.js";
+import { deriveDepositSettlementStatus } from "./paymentSettlement.service.js";
 
 const normalizePhone = (phone) => String(phone || "").trim();
 const KENYA_PHONE_REGEX = /^\+254\d{9}$/;
@@ -55,79 +57,107 @@ export const confirmDeposit = async ({
     applyWalletCredit = true,
     recordLiabilityLedger = true
 }) => {
-    const paymentTransaction = await PaymentTransaction.findById(paymentTransactionId);
+    return runInTransaction(async (session) => {
+        let paymentTransactionQuery = PaymentTransaction.findById(paymentTransactionId);
+        if (session) {
+            paymentTransactionQuery = paymentTransactionQuery.session(session);
+        }
+        const paymentTransaction = await paymentTransactionQuery;
 
-    if (!paymentTransaction) {
-        throw new Error("Payment transaction not found");
-    }
+        if (!paymentTransaction) {
+            throw new Error("Payment transaction not found");
+        }
 
-    if (paymentTransaction.type !== "DEPOSIT") {
-        throw new Error("Invalid payment transaction type");
-    }
+        if (paymentTransaction.type !== "DEPOSIT") {
+            throw new Error("Invalid payment transaction type");
+        }
 
-    if (paymentTransaction.status === "SUCCESS") {
-        return paymentTransaction;
-    }
+        if (paymentTransaction.status === "SUCCESS") {
+            return paymentTransaction;
+        }
 
-    if (recordLiabilityLedger) {
-        const amount = validateAmount(paymentTransaction.amount);
-        const eventId = buildPaymentEventId(paymentTransaction._id);
+        if (recordLiabilityLedger) {
+            const amount = validateAmount(paymentTransaction.amount);
+            const eventId = buildPaymentEventId(paymentTransaction._id);
 
-        await postLedger({
-            userId: paymentTransaction.userId,
-            eventId,
-            reference: externalRef || paymentTransaction.externalRef || `deposit_${paymentTransaction._id}`,
-            entries: [
-                {
-                    eventId,
-                    account: "MPESA_COLLECTION",
-                    amount: -amount
-                },
-                {
-                    eventId,
-                    account: "USER_WALLET_LIABILITY",
-                    amount: amount
-                }
-            ],
-            walletDelta: applyWalletCredit ? amount : 0,
-            idempotencyQuery: {
-                eventId,
+            await postLedger({
                 userId: paymentTransaction.userId,
-                account: "USER_WALLET_LIABILITY"
-            },
-            checkpointAccount: "USER_WALLET_LIABILITY"
+                eventId,
+                reference: externalRef || paymentTransaction.externalRef || `deposit_${paymentTransaction._id}`,
+                entries: [
+                    {
+                        eventId,
+                        account: "MPESA_COLLECTION",
+                        amount: -amount
+                    },
+                    {
+                        eventId,
+                        account: "USER_WALLET_LIABILITY",
+                        amount: amount
+                    }
+                ],
+                walletDelta: applyWalletCredit ? amount : 0,
+                idempotencyQuery: {
+                    eventId,
+                    userId: paymentTransaction.userId,
+                    account: "USER_WALLET_LIABILITY"
+                },
+                checkpointAccount: "USER_WALLET_LIABILITY",
+                session
+            });
+        }
+
+        paymentTransaction.status = "SUCCESS";
+        paymentTransaction.providerRequestId = providerRequestId || paymentTransaction.providerRequestId;
+        paymentTransaction.providerTransactionId = providerTransactionId || paymentTransaction.providerTransactionId;
+        paymentTransaction.externalRef = externalRef || paymentTransaction.externalRef;
+        paymentTransaction.rawCallback = rawCallback || paymentTransaction.rawCallback;
+        paymentTransaction.settlementStatus = deriveDepositSettlementStatus({
+            externalRef: paymentTransaction.externalRef,
+            applyWalletCredit
         });
-    }
+        if (paymentTransaction.settlementStatus !== "SETTLED") {
+            paymentTransaction.settlementReference = null;
+            paymentTransaction.settlementBatchKey = null;
+            paymentTransaction.settledAt = null;
+            paymentTransaction.settlementFailureReason = null;
+        }
+        await paymentTransaction.save({ session });
 
-    paymentTransaction.status = "SUCCESS";
-    paymentTransaction.providerRequestId = providerRequestId || paymentTransaction.providerRequestId;
-    paymentTransaction.providerTransactionId = providerTransactionId || paymentTransaction.providerTransactionId;
-    paymentTransaction.externalRef = externalRef || paymentTransaction.externalRef;
-    paymentTransaction.rawCallback = rawCallback || paymentTransaction.rawCallback;
-    await paymentTransaction.save();
-
-    return paymentTransaction;
+        return paymentTransaction;
+    }, { label: "confirm-deposit" });
 };
 
 export const failDeposit = async ({ paymentTransactionId, failureReason, rawCallback = null }) => {
-    const paymentTransaction = await PaymentTransaction.findById(paymentTransactionId);
+    return runInTransaction(async (session) => {
+        let paymentTransactionQuery = PaymentTransaction.findById(paymentTransactionId);
+        if (session) {
+            paymentTransactionQuery = paymentTransactionQuery.session(session);
+        }
+        const paymentTransaction = await paymentTransactionQuery;
 
-    if (!paymentTransaction) {
-        throw new Error("Payment transaction not found");
-    }
+        if (!paymentTransaction) {
+            throw new Error("Payment transaction not found");
+        }
 
-    if (paymentTransaction.type !== "DEPOSIT") {
-        throw new Error("Invalid payment transaction type");
-    }
+        if (paymentTransaction.type !== "DEPOSIT") {
+            throw new Error("Invalid payment transaction type");
+        }
 
-    if (paymentTransaction.status === "SUCCESS") {
+        if (paymentTransaction.status === "SUCCESS") {
+            return paymentTransaction;
+        }
+
+        paymentTransaction.status = "FAILED";
+        paymentTransaction.failureReason = String(failureReason || "Deposit failed");
+        paymentTransaction.rawCallback = rawCallback || paymentTransaction.rawCallback;
+        paymentTransaction.settlementStatus = "NOT_APPLICABLE";
+        paymentTransaction.settlementReference = null;
+        paymentTransaction.settlementBatchKey = null;
+        paymentTransaction.settledAt = null;
+        paymentTransaction.settlementFailureReason = null;
+        await paymentTransaction.save({ session });
+
         return paymentTransaction;
-    }
-
-    paymentTransaction.status = "FAILED";
-    paymentTransaction.failureReason = String(failureReason || "Deposit failed");
-    paymentTransaction.rawCallback = rawCallback || paymentTransaction.rawCallback;
-    await paymentTransaction.save();
-
-    return paymentTransaction;
+    }, { label: "fail-deposit" });
 };

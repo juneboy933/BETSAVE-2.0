@@ -19,6 +19,7 @@ import { validatePartnerModeConfiguration } from './middleware/partnerMode.middl
 const PORT = env.PORT;
 const app = express();
 let server;
+const isProduction = String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
 
 const terminateProcess = (error, context) => {
     logger.error(`[startup] ${context}`, { error: error?.stack || error?.message || String(error) });
@@ -43,6 +44,9 @@ app.use(express.json());
 
 // CORS handling with whitelist
 const corsOrigins = env.CORS_ALLOWED_ORIGINS.split(',').map(o => o.trim()).filter(Boolean);
+if (isProduction && corsOrigins.length === 0) {
+    throw new Error("CORS_ALLOWED_ORIGINS must be configured in production");
+}
 const defaultAllowedHeaders = [
     'Content-Type',
     'Authorization',
@@ -57,8 +61,17 @@ const defaultAllowedHeaders = [
 ];
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    const allowOrigin = origin && (!corsOrigins.length || corsOrigins.includes(origin));
+    const allowOrigin = origin && corsOrigins.includes(origin);
     if (allowOrigin) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+        res.header('Vary', 'Origin');
+    } else if (origin && (isProduction || corsOrigins.length > 0)) {
+        return res.status(403).json({
+            status: "FAILED",
+            reason: "Origin not allowed"
+        });
+    } else if (origin && !isProduction && corsOrigins.length === 0) {
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
         res.header('Vary', 'Origin');

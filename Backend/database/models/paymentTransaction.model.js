@@ -65,7 +65,52 @@ const paymentTransactionSchema = new mongoose.Schema({
         index: true
     },
 
+    providerResponse: {
+        type: Object,
+        default: null
+    },
+
     rawCallback: {
+        type: Object,
+        default: null
+    },
+
+    settlementStatus: {
+        type: String,
+        enum: ["NOT_APPLICABLE", "PENDING", "SETTLED", "EXCEPTION"],
+        default: function () {
+            return this.type === "DEPOSIT" ? "PENDING" : "NOT_APPLICABLE";
+        },
+        index: true
+    },
+
+    settlementReference: {
+        type: String,
+        trim: true,
+        default: null,
+        index: true
+    },
+
+    settlementBatchKey: {
+        type: String,
+        trim: true,
+        default: null,
+        index: true
+    },
+
+    settledAt: {
+        type: Date,
+        default: null,
+        index: true
+    },
+
+    settlementFailureReason: {
+        type: String,
+        trim: true,
+        default: null
+    },
+
+    settlementMetadata: {
         type: Object,
         default: null
     },
@@ -87,6 +132,9 @@ const paymentTransactionSchema = new mongoose.Schema({
 
 paymentTransactionSchema.index({ userId: 1, createdAt: -1 });
 paymentTransactionSchema.index({ type: 1, status: 1, createdAt: -1 });
+paymentTransactionSchema.index({ type: 1, status: 1, updatedAt: -1 });
+paymentTransactionSchema.index({ type: 1, settlementStatus: 1, updatedAt: -1 });
+paymentTransactionSchema.index({ externalRef: 1, createdAt: -1 });
 
 const PaymentTransaction = mongoose.model("PaymentTransaction", paymentTransactionSchema);
 

@@ -5,6 +5,10 @@ import { getPartnerOperatingMode, partnerRequest } from "../../../lib/api";
 import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function PartnerDashboardEvents() {
+  const maskPhone = (value) => {
+    const digits = String(value || "").replace(/\D/g, "");
+    return digits ? `***${digits.slice(-3)}` : "-";
+  };
   const [form, setForm] = useState({ eventId: `BET-${Date.now()}`, phone: "", amount: 0, type: "BET_PLACED" });
   const [events, setEvents] = useState([]);
   const [message, setMessage] = useState("");
@@ -19,6 +23,15 @@ export default function PartnerDashboardEvents() {
       : status === "FAILED"
         ? "bg-red-50 text-red-800 font-semibold"
         : "bg-slate-50 text-slate-700 font-semibold";
+  const paymentStatusLabel = (status) => {
+    const normalized = String(status || "").toUpperCase();
+    if (!normalized) return "No payment record yet";
+    if (normalized === "SUCCESS") return "Payment confirmed";
+    if (normalized === "FAILED") return "Payment failed";
+    if (normalized === "PENDING") return "Awaiting M-Pesa callback";
+    if (normalized === "INITIATED") return "Payment initiated";
+    return normalized;
+  };
   const amountClass = (value) =>
     Number(value) < 0 ? "bg-red-50 text-red-800 font-semibold" : "bg-emerald-50 text-emerald-800 font-semibold";
   const amountLabel = (value) => `${Number(value) >= 0 ? "+" : ""}${Number(value) || 0}`;
@@ -87,7 +100,10 @@ export default function PartnerDashboardEvents() {
 
   return (
     <article className="card space-y-3">
-      <h2 className="text-lg font-bold">Bet Event Stream</h2>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Events</p>
+        <h2 className="mt-2 text-2xl font-bold text-slate-950">Bet event stream</h2>
+      </div>
       {operatingMode === "demo" ? (
         <section className="callout">
           Demo composer below can still trigger a real STK push when collection is configured. The resulting payment and ledger records stay demo-scoped, and the user's live spendable wallet balance is not increased.
@@ -173,6 +189,8 @@ export default function PartnerDashboardEvents() {
             <tr>
               <th>Event ID</th>
               <th>Status</th>
+              <th>Payment</th>
+              <th>Phone</th>
               <th>Amount</th>
               <th>Savings</th>
               <th>Created</th>
@@ -182,7 +200,19 @@ export default function PartnerDashboardEvents() {
             {pagedEvents.map((e) => (
               <tr key={e._id}>
                 <td>{e.eventId}</td>
-                <td className={statusClass(e.status)}>{e.status}</td>
+                <td>
+                  <div className={`inline-block rounded-full px-3 py-1 text-xs ${statusClass(e.status)}`}>
+                    {e.status}
+                  </div>
+                  {e.rawStatus && e.rawStatus !== e.status ? (
+                    <p className="mt-1 text-xs font-medium text-slate-500">Resolved from {e.rawStatus}</p>
+                  ) : null}
+                  {e.statusReason ? (
+                    <p className="mt-1 text-xs font-medium text-rose-600">{e.statusReason}</p>
+                  ) : null}
+                </td>
+                <td className="text-xs font-medium text-slate-600">{paymentStatusLabel(e.paymentStatus)}</td>
+                <td className="text-xs text-slate-500">{maskPhone(e.phone)}</td>
                 <td className={amountClass(e.amount)}>{amountLabel(e.amount)}</td>
                 <td className={amountClass(e.savingsAmount)}>{amountLabel(e.savingsAmount)}</td>
                 <td>{new Date(e.createdAt).toLocaleString()}</td>
@@ -190,7 +220,7 @@ export default function PartnerDashboardEvents() {
             ))}
             {pagedEvents.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-slate-500">
+                <td colSpan={7} className="text-center text-slate-500">
                   No events loaded.
                 </td>
               </tr>

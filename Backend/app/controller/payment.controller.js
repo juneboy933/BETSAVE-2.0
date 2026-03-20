@@ -35,6 +35,7 @@ import {
     validateDepositSettlement,
     validateWithdrawalSettlement
 } from "../../service/paymentCallbackValidation.service.js";
+import { recordOperationalLogSafe } from "../../service/operationalLog.service.js";
 
 const isSuccessStatus = (status) => {
     const normalized = String(status || "").trim().toUpperCase();
@@ -276,8 +277,29 @@ export const createDeposit = async (req, res) => {
             paymentTransaction.providerRequestId = providerAck.checkoutRequestId || paymentTransaction.providerRequestId;
             paymentTransaction.providerTransactionId = providerAck.merchantRequestId || paymentTransaction.providerTransactionId;
             paymentTransaction.externalRef = accountReference;
+            paymentTransaction.providerResponse = providerAck.raw || paymentTransaction.providerResponse;
             await paymentTransaction.save();
         }
+
+        await recordOperationalLogSafe({
+            category: "PAYMENT",
+            action: "USER_DEPOSIT_CREATED",
+            level: "INFO",
+            status: paymentTransaction.status,
+            message: `Created deposit transaction ${paymentTransaction._id}`,
+            targetType: "PAYMENT_TRANSACTION",
+            targetId: String(paymentTransaction._id),
+            userId,
+            paymentTransactionId: paymentTransaction._id,
+            externalRef: paymentTransaction.externalRef,
+            metadata: {
+                channel: paymentTransaction.channel,
+                amount: paymentTransaction.amount,
+                providerRequestId: paymentTransaction.providerRequestId,
+                providerTransactionId: paymentTransaction.providerTransactionId,
+                providerResponse: providerAck?.raw || null
+            }
+        });
 
         return res.status(201).json({
             status: "SUCCESS",
@@ -285,6 +307,21 @@ export const createDeposit = async (req, res) => {
             providerAck
         });
     } catch (error) {
+        await recordOperationalLogSafe({
+            category: "PAYMENT",
+            action: "USER_DEPOSIT_REJECTED",
+            level: "ERROR",
+            status: "FAILED",
+            message: `Deposit request failed: ${error.message}`,
+            targetType: "PAYMENT_REQUEST",
+            targetId: String(req.params?.userId || ""),
+            userId: req.params?.userId || null,
+            externalRef: req.body?.externalRef || null,
+            metadata: {
+                error: error.message,
+                channel: req.body?.channel || "STK"
+            }
+        });
         return res.status(400).json({
             status: "FAILED",
             reason: error.message
@@ -341,11 +378,14 @@ export const createWithdrawal = async (req, res) => {
             }
 
             try {
+                const withdrawalOccasion = `BETSAVE_WD_${withdrawalRequest._id}`;
+                paymentTransaction.externalRef = paymentTransaction.externalRef || withdrawalOccasion;
+
                 providerAck = await initiateB2C({
                     phone: paymentTransaction.phone,
                     amount: paymentTransaction.amount,
                     remarks: "Betsave withdrawal",
-                    occasion: `BETSAVE_WD_${withdrawalRequest._id}`,
+                    occasion: withdrawalOccasion,
                     timeoutUrl: buildSignedCallbackUrl({
                         baseUrl: process.env.DARAJA_B2C_TIMEOUT_URL,
                         callbackType: "withdrawal",
@@ -360,6 +400,7 @@ export const createWithdrawal = async (req, res) => {
 
                 paymentTransaction.providerRequestId = providerAck.originatorConversationId || paymentTransaction.providerRequestId;
                 paymentTransaction.providerTransactionId = providerAck.conversationId || paymentTransaction.providerTransactionId;
+                paymentTransaction.providerResponse = providerAck.raw || paymentTransaction.providerResponse;
                 await paymentTransaction.save();
             } catch (error) {
                 await markWithdrawalFailed({
@@ -370,6 +411,26 @@ export const createWithdrawal = async (req, res) => {
             }
         }
 
+        await recordOperationalLogSafe({
+            category: "PAYMENT",
+            action: "WITHDRAWAL_CREATED",
+            level: "INFO",
+            status: paymentTransaction.status,
+            message: `Created withdrawal transaction ${paymentTransaction._id}`,
+            targetType: "PAYMENT_TRANSACTION",
+            targetId: String(paymentTransaction._id),
+            userId,
+            paymentTransactionId: paymentTransaction._id,
+            withdrawalRequestId: withdrawalRequest._id,
+            externalRef: paymentTransaction.externalRef,
+            metadata: {
+                amount: paymentTransaction.amount,
+                providerRequestId: paymentTransaction.providerRequestId,
+                providerTransactionId: paymentTransaction.providerTransactionId,
+                providerResponse: providerAck?.raw || null
+            }
+        });
+
         return res.status(201).json({
             status: "SUCCESS",
             paymentTransaction,
@@ -377,6 +438,19 @@ export const createWithdrawal = async (req, res) => {
             providerAck
         });
     } catch (error) {
+        await recordOperationalLogSafe({
+            category: "PAYMENT",
+            action: "WITHDRAWAL_REJECTED",
+            level: "ERROR",
+            status: "FAILED",
+            message: `Withdrawal request failed: ${error.message}`,
+            targetType: "WITHDRAWAL_REQUEST",
+            targetId: String(req.params?.userId || ""),
+            userId: req.params?.userId || null,
+            metadata: {
+                error: error.message
+            }
+        });
         return res.status(400).json({
             status: "FAILED",
             reason: error.message
@@ -483,11 +557,46 @@ export const createPaymentCallbackHandlers = (deps = {}) => {
                 });
             }
 
+            await recordOperationalLogSafe({
+                category: "PAYMENT",
+                action: callbackIsSuccess ? "DEPOSIT_CALLBACK_CONFIRMED" : "DEPOSIT_CALLBACK_FAILED",
+                level: callbackIsSuccess ? "INFO" : "WARN",
+                status: paymentTransaction.status,
+                message: callbackIsSuccess
+                    ? `Deposit callback confirmed transaction ${paymentTransaction._id}`
+                    : `Deposit callback failed transaction ${paymentTransaction._id}`,
+                targetType: "PAYMENT_TRANSACTION",
+                targetId: String(paymentTransaction._id),
+                userId: paymentTransaction.userId,
+                paymentTransactionId: paymentTransaction._id,
+                operatingMode: partnerMode,
+                externalRef: paymentTransaction.externalRef,
+                metadata: {
+                    providerRequestId: paymentTransaction.providerRequestId,
+                    providerTransactionId: paymentTransaction.providerTransactionId,
+                    failureReason: parsed.failureReason || null
+                }
+            });
+
             return res.json({
                 status: "SUCCESS",
                 paymentTransaction
             });
         } catch (error) {
+            await recordOperationalLogSafe({
+                category: "PAYMENT",
+                action: "DEPOSIT_CALLBACK_REJECTED",
+                level: "ERROR",
+                status: "FAILED",
+                message: `Deposit callback rejected: ${error.message}`,
+                targetType: "PAYMENT_CALLBACK",
+                targetId: String(req.query?.paymentTransactionId || ""),
+                metadata: {
+                    error: error.message,
+                    query: req.query || {},
+                    body: req.body || {}
+                }
+            });
             return res.status(400).json({
                 status: "FAILED",
                 reason: error.message
@@ -573,12 +682,47 @@ export const createPaymentCallbackHandlers = (deps = {}) => {
                     rawCallback: parsed.rawCallback
                 });
 
+            await recordOperationalLogSafe({
+                category: "PAYMENT",
+                action: callbackIsSuccess ? "WITHDRAWAL_CALLBACK_CONFIRMED" : "WITHDRAWAL_CALLBACK_FAILED",
+                level: callbackIsSuccess ? "INFO" : "WARN",
+                status: paymentTransaction.status,
+                message: callbackIsSuccess
+                    ? `Withdrawal callback confirmed transaction ${paymentTransaction._id}`
+                    : `Withdrawal callback failed transaction ${paymentTransaction._id}`,
+                targetType: "PAYMENT_TRANSACTION",
+                targetId: String(paymentTransaction._id),
+                userId: paymentTransaction.userId,
+                paymentTransactionId: paymentTransaction._id,
+                withdrawalRequestId: withdrawalRequest._id,
+                externalRef: paymentTransaction.externalRef,
+                metadata: {
+                    providerRequestId: paymentTransaction.providerRequestId,
+                    providerTransactionId: paymentTransaction.providerTransactionId,
+                    failureReason: parsed.failureReason || null
+                }
+            });
+
             return res.json({
                 status: "SUCCESS",
                 paymentTransaction,
                 withdrawalRequest
             });
         } catch (error) {
+            await recordOperationalLogSafe({
+                category: "PAYMENT",
+                action: "WITHDRAWAL_CALLBACK_REJECTED",
+                level: "ERROR",
+                status: "FAILED",
+                message: `Withdrawal callback rejected: ${error.message}`,
+                targetType: "WITHDRAWAL_CALLBACK",
+                targetId: String(req.query?.withdrawalRequestId || ""),
+                metadata: {
+                    error: error.message,
+                    query: req.query || {},
+                    body: req.body || {}
+                }
+            });
             return res.status(400).json({
                 status: "FAILED",
                 reason: error.message

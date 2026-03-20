@@ -10,9 +10,13 @@ import mongoose from "mongoose";
 import { sendpartnerWebhook } from "../../service/notifyPartner.service.js";
 import PartnerNotification from "../../database/models/partnerNotification.model.js";
 import AdminNotification from "../../database/models/adminNotification.model.js";
+import OperationalLog from "../../database/models/operationalLog.model.js";
+import ReconciliationRun from "../../database/models/reconciliationRun.model.js";
 import { supportsTransactions } from "../../service/databaseSession.service.js";
 import { isDarajaCollectionEnabled, isDarajaDisbursementEnabled } from "../../service/daraja.client.js";
 import { parseEventReference } from "../../service/eventReference.service.js";
+import { runPaybillSettlementReconciliation } from "../../service/paymentSettlement.service.js";
+import { maskPhoneForDisplay, sanitizeStructuredData, summarizeUrlForDisplay } from "../../service/redaction.service.js";
 
 const parsePagination = (query) => {
     const page = Math.max(1, Number(query.page) || 1);
@@ -28,6 +32,28 @@ const parsePositiveNumber = (value, fallback) => {
 const normalizeOperatingMode = (value) => {
     const mode = String(value || "").trim().toLowerCase();
     return mode === "demo" ? "demo" : "live";
+};
+const normalizeSettlementScope = (externalRef) => {
+    const mode = String(parseEventReference(externalRef)?.operatingMode || "").trim().toLowerCase();
+    if (mode === "demo") return "demo";
+    if (mode === "live") return "live";
+    return "unscoped";
+};
+const describeWebhook = (webhookUrl) => {
+    const normalized = String(webhookUrl || "").trim();
+    if (!normalized) {
+        return {
+            webhookConfigured: false,
+            webhookHost: null,
+            webhookSecure: false
+        };
+    }
+
+    return {
+        webhookConfigured: true,
+        webhookHost: summarizeUrlForDisplay(normalized),
+        webhookSecure: /^https:\/\//i.test(normalized)
+    };
 };
 const resolveAdminViewMode = (req) => normalizeOperatingMode(req?.query?.operatingMode);
 const WORKER_HEARTBEAT_INTERVAL_MS = 30000;
@@ -223,7 +249,11 @@ export const getAdminPartners = async (req, res) => {
         const data = partners.map((partner) => {
             const stat = statsByName.get(partner.name);
             return {
-                ...partner,
+                _id: partner._id,
+                name: partner.name,
+                status: partner.status,
+                createdAt: partner.createdAt,
+                ...describeWebhook(partner.webhookUrl),
                 stats: {
                     totalEvents: stat?.totalEvents || 0,
                     processedEvents: stat?.processedEvents || 0,
@@ -313,14 +343,25 @@ export const getAdminPartnerDetails = async (req, res) => {
 
         return res.json({
             status: "SUCCESS",
-            partner,
             stats: eventStats,
             partnerUsers,
             savings: {
                 totalSavings: clampNonNegative(savingsAgg[0]?.totalSavings),
                 entries: savingsAgg[0]?.entries || 0
             },
-            recentEvents
+            recentEvents: recentEvents.map((event) => ({
+                ...event,
+                phone: maskPhoneForDisplay(event.phone)
+            })),
+            partner: {
+                _id: partner._id,
+                name: partner.name,
+                status: partner.status,
+                operatingMode: partner.operatingMode,
+                createdAt: partner.createdAt,
+                updatedAt: partner.updatedAt,
+                ...describeWebhook(partner.webhookUrl)
+            }
         });
     } catch (error) {
         return res.status(500).json({
@@ -1045,8 +1086,12 @@ export const getAdminSavings = async (req, res) => {
 export const getAdminOperations = async (req, res) => {
     try {
         const operatingMode = resolveAdminViewMode(req);
+        const observabilityWindowStart = new Date(Date.now() - (24 * 60 * 60 * 1000));
         const stalePendingBefore = new Date(
             Date.now() - parsePositiveNumber(process.env.STALE_PENDING_PAYMENT_MS, 30 * 60 * 1000)
+        );
+        const staleSettlementBefore = new Date(
+            Date.now() - parsePositiveNumber(process.env.STALE_SETTLEMENT_MS, 24 * 60 * 60 * 1000)
         );
         const staleProcessingBefore = new Date(
             Date.now() - parsePositiveNumber(process.env.STALE_PROCESSING_EVENT_MS, 10 * 60 * 1000)
@@ -1058,7 +1103,12 @@ export const getAdminOperations = async (req, res) => {
             staleProcessingEvents,
             stalePendingDeposits,
             stalePendingWithdrawals,
-            workerStatuses
+            successfulUnsettledDeposits,
+            settledDepositsLastDay,
+            workerStatuses,
+            recentOperationalLogs,
+            operationalLogSummary,
+            recentReconciliationRuns
         ] = await Promise.all([
             Event.countDocuments({ status: "FAILED", operatingMode }),
             Partner.countDocuments({ status: "SUSPENDED" }),
@@ -1074,8 +1124,61 @@ export const getAdminOperations = async (req, res) => {
                 status: "PENDING",
                 updatedAt: { $lt: stalePendingBefore }
             }),
+            PaymentTransaction.find({
+                type: "DEPOSIT",
+                status: "SUCCESS",
+                settlementStatus: "PENDING"
+            })
+                .select("externalRef amount updatedAt")
+                .lean(),
+            PaymentTransaction.aggregate([
+                {
+                    $match: {
+                        type: "DEPOSIT",
+                        settlementStatus: "SETTLED",
+                        settledAt: { $gte: observabilityWindowStart }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalAmount: { $sum: "$amount" },
+                        count: { $sum: 1 }
+                    }
+                }
+            ]),
             WorkerStatus.find({})
                 .select("workerName status hostname pid lastHeartbeatAt lastSuccessAt lastErrorAt errorMessage metadata")
+                .lean(),
+            OperationalLog.find({
+                $or: [
+                    { operatingMode },
+                    { operatingMode: null }
+                ]
+            })
+                .sort({ createdAt: -1 })
+                .limit(50)
+                .lean(),
+            OperationalLog.aggregate([
+                {
+                    $match: {
+                        createdAt: { $gte: observabilityWindowStart },
+                        $or: [
+                            { operatingMode },
+                            { operatingMode: null }
+                        ]
+                    }
+                },
+                {
+                    $group: {
+                        _id: "$level",
+                        count: { $sum: 1 }
+                    }
+                }
+            ]),
+            ReconciliationRun.find({})
+                .sort({ createdAt: -1 })
+                .limit(10)
                 .lean()
         ]);
 
@@ -1099,6 +1202,25 @@ export const getAdminOperations = async (req, res) => {
             selectedMode: 0,
             otherMode: 0,
             unscoped: 0
+        });
+        const unsettledSettlementScope = successfulUnsettledDeposits.reduce((acc, deposit) => {
+            const scope = normalizeSettlementScope(deposit.externalRef);
+            const bucket = scope === "demo" || scope === "live" ? scope : "unscoped";
+            const amount = Number(deposit.amount || 0);
+            const isStale = deposit.updatedAt && new Date(deposit.updatedAt) < staleSettlementBefore;
+
+            acc[bucket].count += 1;
+            acc[bucket].amount += amount;
+            if (isStale) {
+                acc[bucket].staleCount += 1;
+                acc[bucket].staleAmount += amount;
+            }
+
+            return acc;
+        }, {
+            demo: { count: 0, amount: 0, staleCount: 0, staleAmount: 0 },
+            live: { count: 0, amount: 0, staleCount: 0, staleAmount: 0 },
+            unscoped: { count: 0, amount: 0, staleCount: 0, staleAmount: 0 }
         });
 
         const expectedWorkers = [
@@ -1133,7 +1255,7 @@ export const getAdminOperations = async (req, res) => {
                 lastSuccessAt: worker?.lastSuccessAt || null,
                 lastErrorAt: worker?.lastErrorAt || null,
                 errorMessage: worker?.errorMessage || null,
-                metadata: worker?.metadata || null
+                metadata: null
             };
         });
 
@@ -1143,7 +1265,8 @@ export const getAdminOperations = async (req, res) => {
             paymentCallbackTokenConfigured: Boolean(process.env.PAYMENT_CALLBACK_TOKEN),
             bankApiUrlConfigured: Boolean(process.env.BANK_API_URL),
             bankApiKeyConfigured: Boolean(process.env.BANK_API_KEY),
-            settlementAccountConfigured: Boolean(process.env.BANK_SETTLEMENT_ACCOUNT)
+            settlementAccountConfigured: Boolean(process.env.BANK_SETTLEMENT_ACCOUNT),
+            settlementAutomationConfigured: Boolean(process.env.BANK_API_URL && process.env.BANK_API_KEY)
         };
 
         return res.json({
@@ -1161,11 +1284,23 @@ export const getAdminOperations = async (req, res) => {
                     totalPartnerUsers,
                     stalePendingWithdrawals,
                     stalePendingDepositsOtherMode: depositScope.otherMode,
-                    stalePendingDepositsUnscoped: depositScope.unscoped
+                    stalePendingDepositsUnscoped: depositScope.unscoped,
+                    unsettledSuccessfulDepositsOtherMode: unsettledSettlementScope[operatingMode === "live" ? "demo" : "live"].count,
+                    unsettledSuccessfulDepositsUnscoped: unsettledSettlementScope.unscoped.count
                 },
                 thresholds: {
                     staleProcessingEventMs: parsePositiveNumber(process.env.STALE_PROCESSING_EVENT_MS, 10 * 60 * 1000),
-                    stalePendingPaymentMs: parsePositiveNumber(process.env.STALE_PENDING_PAYMENT_MS, 30 * 60 * 1000)
+                    stalePendingPaymentMs: parsePositiveNumber(process.env.STALE_PENDING_PAYMENT_MS, 30 * 60 * 1000),
+                    staleSettlementMs: parsePositiveNumber(process.env.STALE_SETTLEMENT_MS, 24 * 60 * 60 * 1000)
+                },
+                settlement: {
+                    selectedMode: unsettledSettlementScope[operatingMode],
+                    otherMode: unsettledSettlementScope[operatingMode === "live" ? "demo" : "live"],
+                    unscoped: unsettledSettlementScope.unscoped,
+                    settledLast24Hours: {
+                        count: settledDepositsLastDay[0]?.count || 0,
+                        totalAmount: clampNonNegative(settledDepositsLastDay[0]?.totalAmount)
+                    }
                 }
             },
             integrationReadiness,
@@ -1174,16 +1309,87 @@ export const getAdminOperations = async (req, res) => {
                 allWorkersHealthy: workers.every((worker) => worker.isHealthy),
                 workers
             },
+            observability: {
+                summary: {
+                    info: operationalLogSummary.find((item) => item._id === "INFO")?.count || 0,
+                    warn: operationalLogSummary.find((item) => item._id === "WARN")?.count || 0,
+                    error: operationalLogSummary.find((item) => item._id === "ERROR")?.count || 0,
+                    windowStartedAt: observabilityWindowStart.toISOString()
+                },
+                recentOperationalLogs: recentOperationalLogs.map((log) => ({
+                    _id: log._id,
+                    createdAt: log.createdAt,
+                    level: log.level,
+                    category: log.category,
+                    action: log.action,
+                    status: log.status,
+                    message: log.message,
+                    partnerName: log.partnerName || null,
+                    eventId: log.eventId || null,
+                    paymentTransactionId: log.paymentTransactionId || null,
+                    withdrawalRequestId: log.withdrawalRequestId || null,
+                    metadata: sanitizeStructuredData(log.metadata || {})
+                })),
+                recentReconciliationRuns
+            },
             roadmap: {
                 nextMilestones: [
-                    "Wire provider-side settlement reconciliation into ReconciliationRun records",
+                    "Automate provider-side settlement ingestion from your bank or finance export feed",
                     "Add alert routing for stale pending deposits and withdrawals",
-                    "Add smoke tests for callback, webhook, and recovery flows"
+                    "Run periodic disaster recovery drills against Daraja callback delay and replay scenarios"
                 ]
             }
         });
     } catch (error) {
         return res.status(500).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const runAdminSettlementReconciliation = async (req, res) => {
+    try {
+        const settlements = Array.isArray(req.body?.settlements) ? req.body.settlements : [];
+        if (!settlements.length) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "settlements must be a non-empty array"
+            });
+        }
+
+        const result = await runPaybillSettlementReconciliation({
+            settlements,
+            runDate: req.body?.runDate || new Date(),
+            source: req.body?.source || "SAFARICOM_PAYBILL",
+            batchReference: req.body?.batchReference || null,
+            settlementAccount: req.body?.settlementAccount || process.env.BANK_SETTLEMENT_ACCOUNT || null
+        });
+
+        await logAdminDecision(req, {
+            action: "SETTLEMENT_RECONCILIATION_RUN",
+            title: "Settlement Reconciliation Completed",
+            message: `Settlement reconciliation run ${result.run._id} completed with status ${result.run.status}.`,
+            targetType: "RECONCILIATION_RUN",
+            targetId: String(result.run._id),
+            metadata: {
+                status: result.run.status,
+                source: result.run.source,
+                batchReference: result.run.batchReference,
+                settledTransactions: result.run.settledTransactions,
+                duplicateTransactions: result.run.duplicateTransactions,
+                unmatchedTransactions: result.run.unmatchedTransactions,
+                discrepancies: result.run.discrepancies?.length || 0
+            }
+        });
+
+        return res.status(201).json({
+            status: "SUCCESS",
+            reconciliationRun: result.run,
+            stats: result.stats
+        });
+    } catch (error) {
+        return res.status(400).json({
             status: "FAILED",
             reason: error.message
         });

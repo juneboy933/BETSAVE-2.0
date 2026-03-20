@@ -9,17 +9,17 @@ import {
     getPartnerUsers,
     markPartnerNotificationsRead
 } from '../controller/partnerDashboard.controller.js';
-import { verifyPartnerDashboard } from '../middleware/partnerDashboardAuth.middleware.js';
+import { verifyPartnerDashboardSession } from '../middleware/partnerDashboardAuth.middleware.js';
 
 const router = express.Router();
 
-router.get('/events', verifyPartnerDashboard, getPartnerEvents);
-router.get('/analytics', verifyPartnerDashboard, getPartnerAnalytics);
-router.get('/savings-behavior', verifyPartnerDashboard, getPartnerSavingsBehavior);
-router.get('/users', verifyPartnerDashboard, getPartnerUsers);
-router.get('/user-demo', verifyPartnerDashboard, getPartnerUserDemoState);
-router.get('/notifications', verifyPartnerDashboard, getPartnerNotifications);
-router.get('/notifications/summary', verifyPartnerDashboard, getPartnerNotificationSummary);
-router.patch('/notifications/read-all', verifyPartnerDashboard, markPartnerNotificationsRead);
+router.get('/events', verifyPartnerDashboardSession, getPartnerEvents);
+router.get('/analytics', verifyPartnerDashboardSession, getPartnerAnalytics);
+router.get('/savings-behavior', verifyPartnerDashboardSession, getPartnerSavingsBehavior);
+router.get('/users', verifyPartnerDashboardSession, getPartnerUsers);
+router.get('/user-demo', verifyPartnerDashboardSession, getPartnerUserDemoState);
+router.get('/notifications', verifyPartnerDashboardSession, getPartnerNotifications);
+router.get('/notifications/summary', verifyPartnerDashboardSession, getPartnerNotificationSummary);
+router.patch('/notifications/read-all', verifyPartnerDashboardSession, markPartnerNotificationsRead);
 
 export default router;

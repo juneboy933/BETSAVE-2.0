@@ -12,6 +12,7 @@ import crypto from "crypto";
 import { buildClearedSessionCookie, buildSessionCookie, parseCookies } from "../http/cookie.js";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const HTTPS_URL_REGEX = /^https:\/\//i;
 const PARTNER_COOKIE_NAME = "betsave_partner_session";
 const PARTNER_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 
@@ -55,6 +56,23 @@ export const registerPartnerAuth = async (req, res) => {
             });
         }
 
+        const normalizedWebhookUrl = String(webhookUrl || "").trim();
+        const normalizedOperatingMode = operatingMode === "live" ? "live" : "demo";
+        if (normalizedOperatingMode === "live") {
+            if (!normalizedWebhookUrl) {
+                return res.status(400).json({
+                    status: "FAILED",
+                    reason: "Live partners must provide a webhookUrl"
+                });
+            }
+            if (!HTTPS_URL_REGEX.test(normalizedWebhookUrl)) {
+                return res.status(400).json({
+                    status: "FAILED",
+                    reason: "Live partner webhookUrl must use HTTPS"
+                });
+            }
+        }
+
         // check if partner name/email already exists
         const existingPartner = await Partner.findOne({
             $or: [{ name: name.trim() }, { email: normalizedEmail }]
@@ -84,8 +102,8 @@ export const registerPartnerAuth = async (req, res) => {
             email: normalizedEmail,
             apiKey,
             apiSecretEncrypted: encryptPartnerApiSecret(apiSecret),
-            webhookUrl: webhookUrl?.trim() || null,
-            operatingMode: operatingMode === "live" ? "live" : "demo",
+            webhookUrl: normalizedWebhookUrl || null,
+            operatingMode: normalizedOperatingMode,
             status: "ACTIVE"
         });
 
@@ -118,7 +136,6 @@ export const registerPartnerAuth = async (req, res) => {
                 apiKey,
                 apiSecret
             },
-            token,
             securityNotice:
                 "⚠️ Save your API Key and Secret now. We will not show them again. Store them securely on your backend for signing requests."
         });
@@ -193,8 +210,7 @@ export const loginPartnerAuth = async (req, res) => {
                 name: partnerAuth.partnerId.name,
                 email: normalizedEmail,
                 operatingMode: partnerAuth.partnerId.operatingMode || "demo"
-            },
-            token
+            }
         });
     } catch (error) {
         console.error("loginPartnerAuth error:", error.message);
@@ -244,7 +260,7 @@ export const refreshPartnerToken = async (req, res) => {
 
         return res.json({
             status: "SUCCESS",
-            token: newToken
+            refreshed: true
         });
     } catch (error) {
         console.error("refreshPartnerToken error:", error.message);

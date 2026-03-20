@@ -24,8 +24,13 @@ export default function AdminRegisterPage() {
         setLoading(false);
         return;
       }
-      if (form.password.length < 8) {
-        setError("Password must be at least 8 characters");
+      if (form.password.length < 12) {
+        setError("Password must be at least 12 characters");
+        setLoading(false);
+        return;
+      }
+      if (!/[a-z]/.test(form.password) || !/[A-Z]/.test(form.password) || !/\d/.test(form.password)) {
+        setError("Password must include uppercase, lowercase, and a number");
         setLoading(false);
         return;
       }
@@ -86,10 +91,13 @@ export default function AdminRegisterPage() {
           <input
             className="input"
             type="password"
-            placeholder="At least 8 characters"
+            placeholder="12+ chars, upper/lowercase, number"
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
+          <p className="mt-2 text-xs font-medium text-slate-500">
+            Use a real admin password here, not throwaway junk. This account can govern live operations.
+          </p>
 
           <div className="mt-4 flex flex-wrap gap-2">
             <button className="btn" onClick={onRegister} disabled={loading}>

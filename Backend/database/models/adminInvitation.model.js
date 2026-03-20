@@ -2,11 +2,16 @@ import mongoose from "mongoose";
 
 const adminInvitationSchema = new mongoose.Schema(
     {
-        invitationCode: {
+        invitationCodeHash: {
             type: String,
             required: true,
             unique: true,
             index: true,
+            trim: true
+        },
+        invitationCodePreview: {
+            type: String,
+            required: true,
             trim: true
         },
         invitedEmail: {
@@ -29,7 +34,7 @@ const adminInvitationSchema = new mongoose.Schema(
         expiresAt: {
             type: Date,
             required: true,
-            index: { expireAfterSeconds: 0 } // auto-delete after expiration
+            index: true
         },
         usedAt: {
             type: Date,
@@ -42,7 +47,7 @@ const adminInvitationSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["PENDING", "USED", "REVOKED"],
+            enum: ["PENDING", "USED", "REVOKED", "EXPIRED"],
             default: "PENDING",
             index: true
         },

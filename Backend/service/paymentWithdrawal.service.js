@@ -2,6 +2,7 @@ import PaymentTransaction from "../database/models/paymentTransaction.model.js";
 import Wallet from "../database/models/wallet.model.js";
 import WithdrawalRequest from "../database/models/withdrawalRequest.model.js";
 import { postLedger } from "./postLedger.service.js";
+import { runInTransaction } from "./databaseSession.service.js";
 
 const KENYA_PHONE_REGEX = /^\+254\d{9}$/;
 
@@ -54,64 +55,74 @@ export const createWithdrawalRequest = async ({ userId, phone, amount, idempoten
         throw new Error("Insufficient wallet balance");
     }
 
-    let paymentTransaction = null;
-    let withdrawalRequest = null;
-
     try {
-        paymentTransaction = await PaymentTransaction.create({
-            type: "WITHDRAWAL",
-            channel: "B2C",
-            status: "INITIATED",
-            userId,
-            phone: normalizedPhone,
-            amount: withdrawalAmount,
-            currency: "KES",
-            externalRef: null,
-            idempotencyKey
-        });
+        return await runInTransaction(async (session) => {
+            const createOptions = session ? { session } : undefined;
 
-        withdrawalRequest = await WithdrawalRequest.create({
-            userId,
-            amount: withdrawalAmount,
-            status: "REQUESTED",
-            paymentTransactionId: paymentTransaction._id,
-            notes
-        });
-
-        const reserveEventId = buildReserveEventId(withdrawalRequest._id);
-        await postLedger({
-            userId,
-            eventId: reserveEventId,
-            reference: `withdrawal_reserve_${withdrawalRequest._id}`,
-            entries: [
-                {
-                    eventId: reserveEventId,
-                    account: "USER_WALLET_LIABILITY",
-                    amount: -withdrawalAmount
-                },
-                {
-                    eventId: reserveEventId,
-                    account: "WITHDRAWAL_PENDING",
-                    amount: withdrawalAmount
-                }
-            ],
-            walletDelta: -withdrawalAmount,
-            idempotencyQuery: {
-                eventId: reserveEventId,
+            const [paymentTransaction] = await PaymentTransaction.create([{
+                type: "WITHDRAWAL",
+                channel: "B2C",
+                status: "INITIATED",
                 userId,
-                account: "WITHDRAWAL_PENDING"
-            },
-            checkpointAccount: "WITHDRAWAL_PENDING",
-            enforceNonNegativeBalance: true
-        });
+                phone: normalizedPhone,
+                amount: withdrawalAmount,
+                currency: "KES",
+                externalRef: null,
+                idempotencyKey
+            }], createOptions);
 
-        withdrawalRequest.status = "RESERVED";
-        paymentTransaction.status = "PENDING";
+            const [withdrawalRequest] = await WithdrawalRequest.create([{
+                userId,
+                amount: withdrawalAmount,
+                status: "REQUESTED",
+                paymentTransactionId: paymentTransaction._id,
+                notes
+            }], createOptions);
 
-        await Promise.all([withdrawalRequest.save(), paymentTransaction.save()]);
+            const reserveEventId = buildReserveEventId(withdrawalRequest._id);
+            await postLedger({
+                userId,
+                eventId: reserveEventId,
+                reference: `withdrawal_reserve_${withdrawalRequest._id}`,
+                entries: [
+                    {
+                        eventId: reserveEventId,
+                        account: "USER_WALLET_LIABILITY",
+                        amount: -withdrawalAmount
+                    },
+                    {
+                        eventId: reserveEventId,
+                        account: "WITHDRAWAL_PENDING",
+                        amount: withdrawalAmount
+                    }
+                ],
+                walletDelta: -withdrawalAmount,
+                idempotencyQuery: {
+                    eventId: reserveEventId,
+                    userId,
+                    account: "WITHDRAWAL_PENDING"
+                },
+                checkpointAccount: "WITHDRAWAL_PENDING",
+                enforceNonNegativeBalance: true,
+                session
+            });
 
-        return { paymentTransaction, withdrawalRequest };
+            withdrawalRequest.status = "RESERVED";
+            paymentTransaction.status = "PENDING";
+
+            await Promise.all([
+                withdrawalRequest.save({ session }),
+                paymentTransaction.save({ session })
+            ]);
+
+            return { paymentTransaction, withdrawalRequest };
+        }, { label: "create-withdrawal-request" });
     } catch (error) {
+        const paymentTransaction = await PaymentTransaction.findOne({ idempotencyKey }).select("_id");
+        const withdrawalRequest = paymentTransaction?._id
+            ? await WithdrawalRequest.findOne({ paymentTransactionId: paymentTransaction._id }).select("_id")
+            : null;
+
         if (paymentTransaction?._id) {
             await PaymentTransaction.findByIdAndUpdate(paymentTransaction._id, {
                 $set: {
@@ -133,113 +144,141 @@ export const createWithdrawalRequest = async ({ userId, phone, amount, idempoten
 };
 
 export const markWithdrawalDisbursed = async ({ withdrawalRequestId, providerRequestId = null, providerTransactionId = null, externalRef = null, rawCallback = null }) => {
-    const withdrawalRequest = await WithdrawalRequest.findById(withdrawalRequestId);
-    if (!withdrawalRequest) {
-        throw new Error("Withdrawal request not found");
-    }
+    return runInTransaction(async (session) => {
+        let withdrawalRequestQuery = WithdrawalRequest.findById(withdrawalRequestId);
+        if (session) {
+            withdrawalRequestQuery = withdrawalRequestQuery.session(session);
+        }
+        const withdrawalRequest = await withdrawalRequestQuery;
+        if (!withdrawalRequest) {
+            throw new Error("Withdrawal request not found");
+        }
 
-    const paymentTransaction = await PaymentTransaction.findById(withdrawalRequest.paymentTransactionId);
-    if (!paymentTransaction) {
-        throw new Error("Payment transaction not found");
-    }
+        let paymentTransactionQuery = PaymentTransaction.findById(withdrawalRequest.paymentTransactionId);
+        if (session) {
+            paymentTransactionQuery = paymentTransactionQuery.session(session);
+        }
+        const paymentTransaction = await paymentTransactionQuery;
+        if (!paymentTransaction) {
+            throw new Error("Payment transaction not found");
+        }
 
-    if (withdrawalRequest.status === "DISBURSED") {
-        return { paymentTransaction, withdrawalRequest };
-    }
-    if (withdrawalRequest.status !== "RESERVED") {
-        throw new Error("Withdrawal request is not in a disbursable state");
-    }
-    if (paymentTransaction.status === "FAILED") {
-        throw new Error("Cannot disburse a failed withdrawal");
-    }
+        if (withdrawalRequest.status === "DISBURSED") {
+            return { paymentTransaction, withdrawalRequest };
+        }
+        if (withdrawalRequest.status !== "RESERVED") {
+            throw new Error("Withdrawal request is not in a disbursable state");
+        }
+        if (paymentTransaction.status === "FAILED") {
+            throw new Error("Cannot disburse a failed withdrawal");
+        }
 
-    const disburseEventId = buildDisburseEventId(withdrawalRequest._id);
-    await postLedger({
-        userId: withdrawalRequest.userId,
-        eventId: disburseEventId,
-        reference: externalRef || `withdrawal_disburse_${withdrawalRequest._id}`,
-        entries: [
-            {
-                eventId: disburseEventId,
-                account: "WITHDRAWAL_PENDING",
-                amount: -withdrawalRequest.amount
-            },
-            {
-                eventId: disburseEventId,
-                account: "MPESA_DISBURSEMENT",
-                amount: withdrawalRequest.amount
-            }
-        ],
-        walletDelta: 0,
-        idempotencyQuery: {
-            eventId: disburseEventId,
-            userId: withdrawalRequest.userId,
-            account: "MPESA_DISBURSEMENT"
-        },
-        checkpointAccount: "MPESA_DISBURSEMENT"
-    });
-
-    withdrawalRequest.status = "DISBURSED";
-    paymentTransaction.status = "SUCCESS";
-    paymentTransaction.providerRequestId = providerRequestId || paymentTransaction.providerRequestId;
-    paymentTransaction.providerTransactionId = providerTransactionId || paymentTransaction.providerTransactionId;
-    paymentTransaction.externalRef = externalRef || paymentTransaction.externalRef;
-    paymentTransaction.rawCallback = rawCallback || paymentTransaction.rawCallback;
-
-    await Promise.all([withdrawalRequest.save(), paymentTransaction.save()]);
-
-    return { paymentTransaction, withdrawalRequest };
-};
-
-export const markWithdrawalFailed = async ({ withdrawalRequestId, failureReason, rawCallback = null }) => {
-    const withdrawalRequest = await WithdrawalRequest.findById(withdrawalRequestId);
-    if (!withdrawalRequest) {
-        throw new Error("Withdrawal request not found");
-    }
-
-    const paymentTransaction = await PaymentTransaction.findById(withdrawalRequest.paymentTransactionId);
-    if (!paymentTransaction) {
-        throw new Error("Payment transaction not found");
-    }
-    if (withdrawalRequest.status === "DISBURSED" || paymentTransaction.status === "SUCCESS") {
-        return { paymentTransaction, withdrawalRequest };
-    }
-
-    const isReserved = withdrawalRequest.status === "RESERVED";
-    if (isReserved) {
-        const reverseEventId = buildReverseEventId(withdrawalRequest._id);
+        const disburseEventId = buildDisburseEventId(withdrawalRequest._id);
         await postLedger({
             userId: withdrawalRequest.userId,
-            eventId: reverseEventId,
-            reference: `withdrawal_reverse_${withdrawalRequest._id}`,
+            eventId: disburseEventId,
+            reference: externalRef || `withdrawal_disburse_${withdrawalRequest._id}`,
             entries: [
                 {
-                    eventId: reverseEventId,
+                    eventId: disburseEventId,
                     account: "WITHDRAWAL_PENDING",
                     amount: -withdrawalRequest.amount
                 },
                 {
-                    eventId: reverseEventId,
-                    account: "USER_WALLET_LIABILITY",
+                    eventId: disburseEventId,
+                    account: "MPESA_DISBURSEMENT",
                     amount: withdrawalRequest.amount
                 }
             ],
-            walletDelta: withdrawalRequest.amount,
+            walletDelta: 0,
             idempotencyQuery: {
-                eventId: reverseEventId,
+                eventId: disburseEventId,
                 userId: withdrawalRequest.userId,
-                account: "USER_WALLET_LIABILITY"
+                account: "MPESA_DISBURSEMENT"
             },
-            checkpointAccount: "USER_WALLET_LIABILITY"
+            checkpointAccount: "MPESA_DISBURSEMENT",
+            session
         });
-    }
 
-    withdrawalRequest.status = isReserved ? "REVERSED" : "FAILED";
-    paymentTransaction.status = "FAILED";
-    paymentTransaction.failureReason = String(failureReason || "Withdrawal failed");
-    paymentTransaction.rawCallback = rawCallback || paymentTransaction.rawCallback;
+        withdrawalRequest.status = "DISBURSED";
+        paymentTransaction.status = "SUCCESS";
+        paymentTransaction.providerRequestId = providerRequestId || paymentTransaction.providerRequestId;
+        paymentTransaction.providerTransactionId = providerTransactionId || paymentTransaction.providerTransactionId;
+        paymentTransaction.externalRef = externalRef || paymentTransaction.externalRef;
+        paymentTransaction.rawCallback = rawCallback || paymentTransaction.rawCallback;
 
-    await Promise.all([withdrawalRequest.save(), paymentTransaction.save()]);
+        await Promise.all([
+            withdrawalRequest.save({ session }),
+            paymentTransaction.save({ session })
+        ]);
 
-    return { paymentTransaction, withdrawalRequest };
+        return { paymentTransaction, withdrawalRequest };
+    }, { label: "mark-withdrawal-disbursed" });
+};
+
+export const markWithdrawalFailed = async ({ withdrawalRequestId, failureReason, rawCallback = null }) => {
+    return runInTransaction(async (session) => {
+        let withdrawalRequestQuery = WithdrawalRequest.findById(withdrawalRequestId);
+        if (session) {
+            withdrawalRequestQuery = withdrawalRequestQuery.session(session);
+        }
+        const withdrawalRequest = await withdrawalRequestQuery;
+        if (!withdrawalRequest) {
+            throw new Error("Withdrawal request not found");
+        }
+
+        let paymentTransactionQuery = PaymentTransaction.findById(withdrawalRequest.paymentTransactionId);
+        if (session) {
+            paymentTransactionQuery = paymentTransactionQuery.session(session);
+        }
+        const paymentTransaction = await paymentTransactionQuery;
+        if (!paymentTransaction) {
+            throw new Error("Payment transaction not found");
+        }
+        if (withdrawalRequest.status === "DISBURSED" || paymentTransaction.status === "SUCCESS") {
+            return { paymentTransaction, withdrawalRequest };
+        }
+
+        const isReserved = withdrawalRequest.status === "RESERVED";
+        if (isReserved) {
+            const reverseEventId = buildReverseEventId(withdrawalRequest._id);
+            await postLedger({
+                userId: withdrawalRequest.userId,
+                eventId: reverseEventId,
+                reference: `withdrawal_reverse_${withdrawalRequest._id}`,
+                entries: [
+                    {
+                        eventId: reverseEventId,
+                        account: "WITHDRAWAL_PENDING",
+                        amount: -withdrawalRequest.amount
+                    },
+                    {
+                        eventId: reverseEventId,
+                        account: "USER_WALLET_LIABILITY",
+                        amount: withdrawalRequest.amount
+                    }
+                ],
+                walletDelta: withdrawalRequest.amount,
+                idempotencyQuery: {
+                    eventId: reverseEventId,
+                    userId: withdrawalRequest.userId,
+                    account: "USER_WALLET_LIABILITY"
+                },
+                checkpointAccount: "USER_WALLET_LIABILITY",
+                session
+            });
+        }
+
+        withdrawalRequest.status = isReserved ? "REVERSED" : "FAILED";
+        paymentTransaction.status = "FAILED";
+        paymentTransaction.failureReason = String(failureReason || "Withdrawal failed");
+        paymentTransaction.rawCallback = rawCallback || paymentTransaction.rawCallback;
+
+        await Promise.all([
+            withdrawalRequest.save({ session }),
+            paymentTransaction.save({ session })
+        ]);
+
+        return { paymentTransaction, withdrawalRequest };
+    }, { label: "mark-withdrawal-failed" });
 };

@@ -6,6 +6,10 @@ import { request } from "../../../lib/api";
 import { attachVisiblePolling } from "../../../lib/polling";
 
 export default function AdminDashboardUsers() {
+  const maskPhone = (value) => {
+    const digits = String(value || "").replace(/\D/g, "");
+    return digits ? `***${digits.slice(-3)}` : "-";
+  };
   const router = useRouter();
   const [users, setUsers] = useState([]);
   const [selectedUserForPartners, setSelectedUserForPartners] = useState(null);
@@ -63,8 +67,11 @@ export default function AdminDashboardUsers() {
 
   return (
     <article className="card space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">All Users</h2>
+      <div className="section-head">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Users</p>
+          <h2 className="mt-2 text-2xl font-bold text-slate-950">User oversight</h2>
+        </div>
         <button className="btn" onClick={refresh}>
           Refresh
         </button>
@@ -126,7 +133,12 @@ export default function AdminDashboardUsers() {
           <tbody>
             {pagedUsers.map((u) => (
               <tr key={u._id}>
-                <td>{u.phoneNumber}</td>
+                <td>
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">{maskPhone(u.phoneNumber)}</p>
+                    <p className="text-xs text-slate-500">Open user detail for full number</p>
+                  </div>
+                </td>
                 <td>{u.status}</td>
                 <td>{String(u.verified)}</td>
                 <td>
@@ -180,7 +192,7 @@ export default function AdminDashboardUsers() {
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">User Partner Memberships</h3>
-                <p className="text-sm text-slate-600">{selectedUserForPartners.phoneNumber}</p>
+                <p className="text-sm text-slate-600">{maskPhone(selectedUserForPartners.phoneNumber)}</p>
               </div>
               <button className="btn-secondary" onClick={() => setSelectedUserForPartners(null)}>
                 Close
