@@ -1,10 +1,14 @@
 import Event from '../../database/models/event.model.js';
 import Ledger from "../../database/models/ledger.model.js";
+import OperationalLog from "../../database/models/operationalLog.model.js";
 import PaymentTransaction from "../../database/models/paymentTransaction.model.js";
 import PartnerNotification from "../../database/models/partnerNotification.model.js";
 import PartnerUser from "../../database/models/partnerUser.model.js";
 import { finalizeEvent } from "../../service/eventFinalization.service.js";
+import { parseEventReference } from "../../service/eventReference.service.js";
 import { deriveEffectiveEventState } from "../../service/eventStatus.service.js";
+import { sanitizeStructuredData } from "../../service/redaction.service.js";
+import { resolveWithdrawalEligibility } from "../../service/withdrawalEligibility.service.js";
 
 const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
 const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -498,7 +502,7 @@ export const getPartnerUserDemoState = async (req, res) => {
         }
 
         const eventReferencePrefix = new RegExp(`^EVENT::${escapeRegex(partnerName)}::${operatingMode}::`);
-        const [events, paymentTransactions, attributedWalletBalanceAgg] = await Promise.all([
+        const [events, depositTransactions, withdrawalTransactions, attributedWalletBalanceAgg, walletAttributionEntries, withdrawalPolicy] = await Promise.all([
             Event.find({
                 userId: partnerUser.userId,
                 partnerName,
@@ -509,7 +513,19 @@ export const getPartnerUserDemoState = async (req, res) => {
                 .lean(),
             PaymentTransaction.find({
                 userId: partnerUser.userId,
+                type: "DEPOSIT",
                 externalRef: eventReferencePrefix
+            })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .lean(),
+            PaymentTransaction.find({
+                userId: partnerUser.userId,
+                type: "WITHDRAWAL",
+                $or: [
+                    { partnerId },
+                    { partnerName }
+                ]
             })
                 .sort({ createdAt: -1 })
                 .limit(20)
@@ -528,7 +544,15 @@ export const getPartnerUserDemoState = async (req, res) => {
                         total: { $sum: "$amount" }
                     }
                 }
-            ])
+            ]),
+            Ledger.find({
+                userId: partnerUser.userId,
+                account: "USER_WALLET_LIABILITY",
+                reference: /^EVENT::/
+            })
+                .select("amount reference createdAt")
+                .lean(),
+            resolveWithdrawalEligibility({ userId: partnerUser.userId })
         ]);
 
         const eventIds = events.map((event) => event.eventId);
@@ -549,6 +573,70 @@ export const getPartnerUserDemoState = async (req, res) => {
             (sum, event) => sum + clampNonNegative(event.amount),
             0
         );
+        const savingsByPlatformMap = new Map();
+        walletAttributionEntries.forEach((entry) => {
+            const parsed = parseEventReference(entry.reference);
+            if (!parsed?.partnerName) {
+                return;
+            }
+
+            const existing = savingsByPlatformMap.get(parsed.partnerName) || {
+                partnerName: parsed.partnerName,
+                totalSaved: 0,
+                entries: 0,
+                byMode: {
+                    live: 0,
+                    demo: 0
+                }
+            };
+            const amount = clampNonNegative(entry.amount);
+            existing.totalSaved += amount;
+            existing.entries += 1;
+            existing.byMode[parsed.operatingMode === "demo" ? "demo" : "live"] += amount;
+            savingsByPlatformMap.set(parsed.partnerName, existing);
+        });
+        const byPlatform = [...savingsByPlatformMap.values()]
+            .map((row) => ({
+                ...row,
+                totalSaved: clampNonNegative(row.totalSaved),
+                byMode: {
+                    live: clampNonNegative(row.byMode.live),
+                    demo: clampNonNegative(row.byMode.demo)
+                }
+            }))
+            .sort((left, right) => right.totalSaved - left.totalSaved);
+        const cumulativeTotalSaved = byPlatform.reduce((sum, row) => sum + clampNonNegative(row.totalSaved), 0);
+        const currentPlatform =
+            byPlatform.find((row) => row.partnerName === partnerName) || {
+                partnerName,
+                totalSaved: clampNonNegative(attributedWalletBalanceAgg[0]?.total),
+                entries: 0,
+                byMode: {
+                    live: operatingMode === "live" ? clampNonNegative(attributedWalletBalanceAgg[0]?.total) : 0,
+                    demo: operatingMode === "demo" ? clampNonNegative(attributedWalletBalanceAgg[0]?.total) : 0
+                }
+            };
+
+        const paymentTransactions = [...depositTransactions, ...withdrawalTransactions]
+            .sort((left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime())
+            .slice(0, 30);
+        const withdrawalTransactionIds = withdrawalTransactions
+            .map((transaction) => transaction?._id)
+            .filter(Boolean);
+        const recentWithdrawalLogs = await OperationalLog.find({
+            category: "PAYMENT",
+            action: /^WITHDRAWAL_/,
+            userId: partnerUser.userId,
+            $or: [
+                { partnerName },
+                ...(withdrawalTransactionIds.length
+                    ? [{ paymentTransactionId: { $in: withdrawalTransactionIds } }]
+                    : [])
+            ]
+        })
+            .sort({ createdAt: -1 })
+            .limit(15)
+            .lean();
 
         return res.json({
             status: "SUCCESS",
@@ -558,11 +646,33 @@ export const getPartnerUserDemoState = async (req, res) => {
                 partnerAttributedWalletBalance: clampNonNegative(attributedWalletBalanceAgg[0]?.total),
                 totalSaved,
                 processedEventCount: processedEvents.length,
-                totalProcessedEventAmount
+                totalProcessedEventAmount,
+                savings: {
+                    totalSaved: clampNonNegative(cumulativeTotalSaved || totalSaved),
+                    entries: byPlatform.reduce((sum, row) => sum + (Number(row.entries) || 0), 0) || savingsTransactions.length,
+                    cumulativeTotalSaved: clampNonNegative(cumulativeTotalSaved),
+                    byPlatform,
+                    currentPlatform
+                }
+            },
+            withdrawalPolicy: {
+                ...withdrawalPolicy,
+                canPartnerInitiateWithdrawal: Boolean(withdrawalPolicy?.eligible)
             },
             events,
             savingsTransactions,
-            paymentTransactions
+            paymentTransactions,
+            recentWithdrawalLogs: recentWithdrawalLogs.map((log) => ({
+                _id: log._id,
+                createdAt: log.createdAt,
+                level: log.level,
+                action: log.action,
+                status: log.status,
+                message: log.message,
+                paymentTransactionId: log.paymentTransactionId || null,
+                withdrawalRequestId: log.withdrawalRequestId || null,
+                metadata: sanitizeStructuredData(log.metadata || {})
+            }))
         });
     } catch (error) {
         return res.status(500).json({

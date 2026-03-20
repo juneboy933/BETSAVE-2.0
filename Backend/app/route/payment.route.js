@@ -21,5 +21,7 @@ router.get("/:userId/transactions/:paymentTransactionId", verifyUserToken, requi
 
 router.post("/callbacks/deposit", handleDepositCallback);
 router.post("/callbacks/withdrawal", handleWithdrawalCallback);
+router.post("/callbacks/b2c/queue", handleWithdrawalCallback);
+router.post("/callbacks/b2c/result", handleWithdrawalCallback);
 
 export default router;

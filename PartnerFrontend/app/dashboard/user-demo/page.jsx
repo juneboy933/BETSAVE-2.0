@@ -33,6 +33,13 @@ export default function PartnerDashboardUserDemo() {
   const [savingsTransactions, setSavingsTransactions] = useState([]);
   const [paymentTransactions, setPaymentTransactions] = useState([]);
   const [partnerUser, setPartnerUser] = useState(null);
+  const [withdrawalPolicy, setWithdrawalPolicy] = useState(null);
+  const [recentWithdrawalLogs, setRecentWithdrawalLogs] = useState([]);
+  const [withdrawalForm, setWithdrawalForm] = useState({
+    amount: "",
+    notes: "",
+    idempotencyKey: `partner-demo-withdrawal-${Date.now()}`
+  });
 
   const [otpModalOpen, setOtpModalOpen] = useState(false);
   const [otpCode, setOtpCode] = useState("");
@@ -172,10 +179,57 @@ export default function PartnerDashboardUserDemo() {
       setSavingsTransactions(data.savingsTransactions || []);
       setPaymentTransactions(data.paymentTransactions || []);
       setPartnerUser(data.partnerUser || null);
+      setWithdrawalPolicy(data.withdrawalPolicy || null);
+      setRecentWithdrawalLogs(data.recentWithdrawalLogs || []);
     } catch (err) {
       setError(err.message);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const requestDemoWithdrawal = async () => {
+    if (!normalizedUserPhone) {
+      setError("Enter user phone to request a withdrawal.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      clearNotices();
+
+      let resolvedUserId = userId.trim();
+      if (!resolvedUserId) {
+        resolvedUserId = await resolveUserIdFromPartnerPhone();
+      }
+
+      if (!resolvedUserId) {
+        setError("Could not resolve user ID for this phone. Register/link the user first from Partner Users.");
+        return;
+      }
+
+      const result = await partnerRequest(`/api/v1/partners/users/${encodeURIComponent(resolvedUserId)}/withdrawals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: normalizedUserPhone,
+          amount: Number(withdrawalForm.amount),
+          notes: withdrawalForm.notes.trim(),
+          idempotencyKey: withdrawalForm.idempotencyKey.trim()
+        })
+      });
+
+      setMessage(`Withdrawal queued: ${result.paymentTransaction?._id || result.withdrawalRequest?._id || "request accepted"}`);
+      setWithdrawalForm({
+        amount: "",
+        notes: "",
+        idempotencyKey: `partner-demo-withdrawal-${Date.now()}`
+      });
+      await loadUserData();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -408,10 +462,66 @@ export default function PartnerDashboardUserDemo() {
       <article className="card space-y-3">
         <h3 className="text-base font-bold">Money Movement Demo Policy</h3>
         <section className="callout">
-          Direct deposit and withdrawal buttons were removed from this page because they relied on the wrong auth model
-          and touched real payment routes from a demo surface. Use the Partner Event Stream in demo mode for STK-driven
-          walkthroughs and ledger visibility.
+          This demo withdrawal flow is now routed through the secure partner withdrawal API. It stays fully logged for
+          admin and partner visibility, and it still honors live withdrawal maturity rules if the user wallet is backed
+          by live funds instead of demo-only activity.
         </section>
+        <div className="grid gap-3 md:grid-cols-2">
+          <article className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Withdrawal Mode</p>
+            <p className="mt-2 text-lg font-bold text-slate-900">{String(withdrawalPolicy?.operatingMode || "demo").toUpperCase()}</p>
+            <p className="mt-2 text-sm text-slate-600">
+              {withdrawalPolicy?.eligible
+                ? "This user is currently eligible for withdrawal under the active policy."
+                : withdrawalPolicy?.denialReason || "Load user data to evaluate withdrawal eligibility."}
+            </p>
+          </article>
+          <article className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Policy Snapshot</p>
+            <p className="mt-2 text-sm text-slate-700">Current balance: KES {toPositive(withdrawalPolicy?.currentBalance)}</p>
+            <p className="mt-1 text-sm text-slate-700">Live threshold: KES {toPositive(withdrawalPolicy?.liveMinBalanceKes)}</p>
+            <p className="mt-1 text-sm text-slate-700">Maturity window: {toPositive(withdrawalPolicy?.minAutoSavingsDays)} days</p>
+            <p className="mt-1 text-sm text-slate-700">
+              First eligible:
+              {" "}
+              {withdrawalPolicy?.firstEligibleAt ? new Date(withdrawalPolicy.firstEligibleAt).toLocaleString() : "-"}
+            </p>
+          </article>
+        </div>
+        <div className="grid gap-2 md:grid-cols-3">
+          <input
+            className="input"
+            type="number"
+            min="1"
+            placeholder="Withdrawal amount"
+            value={withdrawalForm.amount}
+            onChange={(e) => setWithdrawalForm((prev) => ({ ...prev, amount: e.target.value }))}
+          />
+          <input
+            className="input"
+            placeholder="Idempotency key"
+            value={withdrawalForm.idempotencyKey}
+            onChange={(e) => setWithdrawalForm((prev) => ({ ...prev, idempotencyKey: e.target.value }))}
+          />
+          <input
+            className="input"
+            placeholder="Notes"
+            value={withdrawalForm.notes}
+            onChange={(e) => setWithdrawalForm((prev) => ({ ...prev, notes: e.target.value }))}
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="btn"
+            onClick={requestDemoWithdrawal}
+            disabled={!normalizedUserPhone || !withdrawalForm.amount || !withdrawalForm.idempotencyKey.trim() || isSubmitting}
+          >
+            {isSubmitting ? "Submitting..." : "Request Demo Withdrawal"}
+          </button>
+          <button className="btn-secondary" onClick={loadUserData} disabled={!normalizedUserPhone || isLoading}>
+            Refresh Wallet State
+          </button>
+        </div>
       </article>
 
       <article className="card">
@@ -550,6 +660,46 @@ export default function PartnerDashboardUserDemo() {
                 <tr>
                   <td colSpan={5} className="text-center text-slate-500">
                     No withdrawals loaded.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="card">
+        <h3 className="mb-2 text-base font-bold">Withdrawal Trace Log</h3>
+        <p className="mb-3 text-sm text-slate-600">
+          This partner-scoped trace shows the secure withdrawal lifecycle from policy check to provider callback so support teams can explain what happened without guessing.
+        </p>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Level</th>
+                <th>Action</th>
+                <th>Status</th>
+                <th>Message</th>
+                <th>Payment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentWithdrawalLogs.map((item) => (
+                <tr key={item._id}>
+                  <td>{item.createdAt ? new Date(item.createdAt).toLocaleString() : "-"}</td>
+                  <td>{item.level || "-"}</td>
+                  <td>{item.action || "-"}</td>
+                  <td className={statusClass(item.status)}>{item.status || "-"}</td>
+                  <td>{item.message || "-"}</td>
+                  <td className="mono text-xs">{item.paymentTransactionId || item.withdrawalRequestId || "-"}</td>
+                </tr>
+              ))}
+              {recentWithdrawalLogs.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="text-center text-slate-500">
+                    No withdrawal trace logs loaded.
                   </td>
                 </tr>
               )}

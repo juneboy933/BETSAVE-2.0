@@ -22,12 +22,14 @@ Pages:
 - `/dashboard/users` partner users table
 - `/dashboard/events` events table with event status, payment state, and savings amount
 - `/dashboard/analytics` analytics and behavior tables
+- `/dashboard/user-demo` demo walkthrough for wallet state, partner-scoped withdrawals, and trace logs
 - `/dashboard/notifications` operational partner notifications
 
 Notes:
 - Partner dashboard pages are operator views only.
 - Signed integration credentials belong on the partner backend, not in browser code.
 - Demo-only controls are intentionally reduced in live mode.
+- The user demo page now shows withdrawal policy status, withdrawal transactions, and a withdrawal trace log so partners can explain money movement during demos and support checks.
 
 ## Admin Frontend
 
@@ -57,7 +59,7 @@ Pages:
 Notes:
 - Admin dashboard uses the admin session cookie.
 - Access management is limited to the primary admin.
-- Operations view includes settlement backlog, stale work, and reconciliation run visibility.
+- Operations view includes settlement backlog, stale work, withdrawal health, recent withdrawals, and reconciliation run visibility.
 
 ## Backend
 

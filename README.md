@@ -20,8 +20,10 @@ When a partner sends a bet event, Betsave ingests it, processes it asynchronousl
 3. Betsave ingests the event and queues it for processing.
 4. The event worker validates the event, calculates savings, initiates payment collection, and links the payment transaction to the event.
 5. Deposit callbacks finalize the event, post balanced ledger entries, and update the wallet.
-6. The webhook worker notifies the partner of terminal event outcomes.
-7. The recovery worker reconciles stale in-flight operations and surfaces stale pending work.
+6. Partner-linked users can request withdrawals through the user API or through a secure partner-backed withdrawal flow.
+7. Withdrawal callbacks finalize the disbursement lifecycle and preserve partner attribution for tracing.
+8. The webhook worker notifies the partner of terminal event outcomes.
+9. The recovery worker reconciles stale in-flight operations and surfaces stale pending work.
 
 ## Backend API Overview
 
@@ -50,6 +52,7 @@ Endpoints:
 - `POST /api/v1/partners/events`
 - `POST /api/v1/partners/users/register`
 - `POST /api/v1/partners/users/verify-otp`
+- `POST /api/v1/partners/users/:userId/withdrawals`
 
 ### Partner Dashboard
 
@@ -59,6 +62,7 @@ Dashboard requests use the partner session cookie issued during login.
 - `GET /api/v1/dashboard/partner/analytics`
 - `GET /api/v1/dashboard/partner/savings-behavior`
 - `GET /api/v1/dashboard/partner/users`
+- `GET /api/v1/dashboard/partner/user-demo`
 - `GET /api/v1/dashboard/partner/notifications`
 
 ### User Dashboard
@@ -110,7 +114,15 @@ Admin access routes:
 - Demo event collection can still trigger real STK collection, callback handling, ledger writes, and payment records when Daraja collection is configured.
 - Demo-mode ledger exposure is intended for demo analytics and demo partner views only.
 - Demo mode does not increase the user's live spendable wallet balance in `Wallet.balance`.
+- Demo withdrawals are allowed whenever the attributed wallet balance is sufficient.
+- Live withdrawals are allowed only when the wallet balance is at least `KES 100` and the user has had live auto-savings enabled for the configured maturity window, currently `90` days by default.
 - Admin dashboards can switch between `demo` and `live` to inspect each slice independently.
+
+## Dashboard Visibility
+
+- Partner dashboard demo view now shows partner-scoped wallet activity, withdrawal policy status, withdrawal transactions, and a withdrawal trace log for support walkthroughs.
+- Admin operations view now shows withdrawal health, recent withdrawals, stale pending work, reconciliation runs, and structured operational logs.
+- Payment, callback, and recovery activity is persisted as structured operational logs so money movement can be traced without relying on terminal output.
 
 ## Local Setup
 
@@ -232,6 +244,7 @@ docker compose -f docker-compose.prod.yml down -v
 - Set `CORS_ALLOWED_ORIGINS` explicitly in production.
 - Monitor stale pending deposits, stale pending withdrawals, and stale processing events from the admin operations view.
 - Monitor unsettled successful deposits and reconciliation runs from the admin operations view.
+- Monitor partner-initiated withdrawals and provider callback outcomes from both the partner user demo flow and the admin operations view.
 - Do not rely on the browser to retain partner integration secrets.
 - Existing admins issue invitation codes from the admin dashboard Access view and send those codes to new admins through a secure out-of-band channel.
 - Only the primary admin created during bootstrap can issue, view, or revoke admin invitation codes.

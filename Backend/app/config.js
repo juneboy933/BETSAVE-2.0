@@ -43,6 +43,8 @@ const envSchema = Joi.object({
     STALE_SETTLEMENT_MS: Joi.number().integer().min(1000).default(24 * 60 * 60 * 1000),
     RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(15 * 60 * 1000),
     RATE_LIMIT_MAX: Joi.number().integer().min(1).default(200),
+    LIVE_WITHDRAWAL_MIN_BALANCE_KES: Joi.number().min(0).default(100),
+    LIVE_WITHDRAWAL_MIN_AUTOSAVINGS_DAYS: Joi.number().integer().min(1).default(90),
 
     DARAJA_ENV: Joi.string().valid('sandbox','production').default('sandbox'),
     DARAJA_HTTP_TIMEOUT_MS: Joi.number().integer().min(1000).default(20000),

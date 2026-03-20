@@ -49,6 +49,10 @@ const partnerUserSchema = new mongoose.Schema(
         autoSavingsEnabled: {
             type: Boolean,
             default: false
+        },
+        autoSavingsEnabledAt: {
+            type: Date,
+            default: null
         }
     },
     { timestamps: true }

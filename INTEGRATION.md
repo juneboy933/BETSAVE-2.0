@@ -73,6 +73,7 @@ Protected write endpoints:
 - `POST /api/v1/partners/events`
 - `POST /api/v1/partners/users/register`
 - `POST /api/v1/partners/users/verify-otp`
+- `POST /api/v1/partners/users/:userId/withdrawals`
 
 ## Partner Event API
 
@@ -104,8 +105,40 @@ Endpoints:
 
 - `POST /api/v1/partners/users/register`
 - `POST /api/v1/partners/users/verify-otp`
+- `POST /api/v1/partners/users/:userId/withdrawals`
 
 Use these from a trusted partner backend in live mode.
+
+### Partner-Initiated Withdrawals
+
+Endpoint:
+
+- `POST /api/v1/partners/users/:userId/withdrawals`
+
+Body:
+
+```json
+{
+  "phone": "+254700000000",
+  "amount": 250,
+  "idempotencyKey": "partner-wd-20260320-001",
+  "notes": "User wallet withdrawal"
+}
+```
+
+Rules:
+
+- `userId` must belong to a partner-linked user for the authenticated partner.
+- If `phone` is provided, it must match the linked partner user phone.
+- `idempotencyKey` is required and must be unique per withdrawal attempt.
+- Betsave records partner attribution on the withdrawal so both partner and admin dashboards can trace who initiated it.
+- In `live` mode, the same signed partner auth and `x-integration-token` rules apply.
+
+Withdrawal policy:
+
+- Demo withdrawals can proceed whenever the partner-attributed wallet balance is sufficient.
+- Live withdrawals are blocked until the user has at least `KES 100` available and has had live auto-savings enabled for the configured maturity window.
+- Betsave logs both allowed and blocked withdrawal policy decisions for auditability.
 
 ## Daraja and Payment Callbacks
 
@@ -140,13 +173,14 @@ Partner dashboard:
 
 - uses the partner session cookie from login
 - shows scoped demo/live status
+- shows partner-scoped withdrawal policy, withdrawal transactions, and withdrawal trace logs in the demo walkthrough
 - is an operator view, not an integration surface
 
 Admin dashboard:
 
 - uses the admin session cookie
 - has a mode switch for `demo` and `live`
-- operations view is the main place to watch stale events, pending payments, unsettled deposits, and reconciliation runs
+- operations view is the main place to watch stale events, pending payments, unsettled deposits, recent withdrawals, and reconciliation runs
 
 ## Production Launch Minimums
 
@@ -160,13 +194,17 @@ Before real-money launch, make sure all of these are true:
 - `BANK_SETTLEMENT_ACCOUNT` is set
 - `PARTNER_INTEGRATION_TOKEN` is set for live partner writes
 - Daraja live credentials and HTTPS callback URLs are configured
+- B2C withdrawal credentials and HTTPS result/timeout URLs are configured
 - reconciliation process is run and monitored daily
+- admin MFA and secret rotation are in place before serious production exposure
 
 ## Recommended Pattern
 
 - Browser/operator logs into Betsave dashboard with email and password
 - Partner backend stores Betsave integration secrets
 - Partner backend signs and sends `BET_PLACED` events
+- Partner backend registers and verifies wallet users before initiating live withdrawals
 - Betsave processes events and pushes terminal outcomes to the partner webhook
+- Betsave records structured logs for deposits, withdrawals, callbacks, reconciliation, and recovery activity
 
 If your browser app is sending signed partner writes directly, that design is weak and should be replaced.

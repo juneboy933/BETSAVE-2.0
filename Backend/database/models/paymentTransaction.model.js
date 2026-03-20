@@ -27,6 +27,27 @@ const paymentTransactionSchema = new mongoose.Schema({
         index: true
     },
 
+    partnerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Partner",
+        default: null,
+        index: true
+    },
+
+    partnerName: {
+        type: String,
+        trim: true,
+        default: null,
+        index: true
+    },
+
+    requestedByType: {
+        type: String,
+        enum: ["USER", "PARTNER"],
+        default: "USER",
+        index: true
+    },
+
     phone: {
         type: String,
         required: true,
@@ -135,6 +156,7 @@ paymentTransactionSchema.index({ type: 1, status: 1, createdAt: -1 });
 paymentTransactionSchema.index({ type: 1, status: 1, updatedAt: -1 });
 paymentTransactionSchema.index({ type: 1, settlementStatus: 1, updatedAt: -1 });
 paymentTransactionSchema.index({ externalRef: 1, createdAt: -1 });
+paymentTransactionSchema.index({ partnerId: 1, type: 1, createdAt: -1 });
 
 const PaymentTransaction = mongoose.model("PaymentTransaction", paymentTransactionSchema);
 

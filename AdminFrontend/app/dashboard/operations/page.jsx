@@ -55,7 +55,9 @@ export default function AdminDashboardOperations() {
   const observabilitySummary = ops?.observability?.summary || {};
   const recentOperationalLogs = ops?.observability?.recentOperationalLogs || [];
   const settlement = ops?.operations?.settlement || {};
+  const withdrawals = ops?.operations?.withdrawals || {};
   const recentReconciliationRuns = ops?.observability?.recentReconciliationRuns || [];
+  const recentWithdrawals = ops?.observability?.recentWithdrawals || [];
 
   return (
     <section className="space-y-4">
@@ -182,6 +184,34 @@ export default function AdminDashboardOperations() {
             <p className="text-xs uppercase tracking-wide">Unscoped unsettled</p>
             <p className="mt-2 text-2xl font-bold">{String(settlement?.unscoped?.count || 0)}</p>
             <p className="mt-1 text-xs">KES {Number(settlement?.unscoped?.amount || 0).toLocaleString()}</p>
+          </article>
+        </div>
+      </article>
+
+      <article className="card">
+        <h3 className="text-lg font-bold text-slate-950">Withdrawal Health</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          These numbers track pending, successful, failed, and partner-initiated withdrawals so support and finance teams can trace disbursement behavior quickly.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <article className={`rounded-2xl border p-4 ${metricTone(withdrawals?.stalePendingCount || 0)}`}>
+            <p className="text-xs uppercase tracking-wide">Stale pending</p>
+            <p className="mt-2 text-2xl font-bold">{String(withdrawals?.stalePendingCount || 0)}</p>
+          </article>
+          <article className={`rounded-2xl border p-4 ${metricTone(withdrawals?.succeededLast24Hours?.count || 0)}`}>
+            <p className="text-xs uppercase tracking-wide">Succeeded last 24h</p>
+            <p className="mt-2 text-2xl font-bold">{String(withdrawals?.succeededLast24Hours?.count || 0)}</p>
+            <p className="mt-1 text-xs">KES {Number(withdrawals?.succeededLast24Hours?.totalAmount || 0).toLocaleString()}</p>
+          </article>
+          <article className={`rounded-2xl border p-4 ${metricTone(withdrawals?.failedLast24Hours?.count || 0)}`}>
+            <p className="text-xs uppercase tracking-wide">Failed last 24h</p>
+            <p className="mt-2 text-2xl font-bold">{String(withdrawals?.failedLast24Hours?.count || 0)}</p>
+            <p className="mt-1 text-xs">KES {Number(withdrawals?.failedLast24Hours?.totalAmount || 0).toLocaleString()}</p>
+          </article>
+          <article className={`rounded-2xl border p-4 ${metricTone(withdrawals?.partnerInitiatedLast24Hours?.count || 0)}`}>
+            <p className="text-xs uppercase tracking-wide">Partner-initiated last 24h</p>
+            <p className="mt-2 text-2xl font-bold">{String(withdrawals?.partnerInitiatedLast24Hours?.count || 0)}</p>
+            <p className="mt-1 text-xs">KES {Number(withdrawals?.partnerInitiatedLast24Hours?.totalAmount || 0).toLocaleString()}</p>
           </article>
         </div>
       </article>
@@ -367,6 +397,50 @@ export default function AdminDashboardOperations() {
                 <tr>
                   <td colSpan={8} className="text-center text-slate-500">
                     No reconciliation runs loaded.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article className="card">
+        <h3 className="text-lg font-bold text-slate-950">Recent Withdrawals</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          This feed shows the latest withdrawal attempts with partner attribution, provider request references, and failure reasons.
+        </p>
+        <div className="table-wrap mt-4">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Status</th>
+                <th>Amount</th>
+                <th>Requested By</th>
+                <th>Partner</th>
+                <th>Phone</th>
+                <th>Provider Request</th>
+                <th>Failure</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentWithdrawals.map((item) => (
+                <tr key={item._id}>
+                  <td>{asDateTime(item.createdAt)}</td>
+                  <td>{item.status || "-"}</td>
+                  <td>KES {Number(item.amount || 0).toLocaleString()}</td>
+                  <td>{item.requestedByType || "-"}</td>
+                  <td>{item.partnerName || "-"}</td>
+                  <td>{item.phone || "-"}</td>
+                  <td>{item.providerRequestId || item.providerTransactionId || "-"}</td>
+                  <td>{item.failureReason || "-"}</td>
+                </tr>
+              ))}
+              {!recentWithdrawals.length ? (
+                <tr>
+                  <td colSpan={8} className="text-center text-slate-500">
+                    No withdrawal activity loaded.
                   </td>
                 </tr>
               ) : null}

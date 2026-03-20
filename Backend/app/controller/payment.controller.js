@@ -3,6 +3,7 @@ import PaymentTransaction from "../../database/models/paymentTransaction.model.j
 import WithdrawalRequest from "../../database/models/withdrawalRequest.model.js";
 import Event from "../../database/models/event.model.js";
 import Partner from "../../database/models/partner.model.js";
+import PartnerUser from "../../database/models/partnerUser.model.js";
 import {
     isDarajaCollectionEnabled,
     isDarajaDisbursementEnabled,
@@ -19,6 +20,7 @@ import {
     markWithdrawalDisbursed,
     markWithdrawalFailed
 } from "../../service/paymentWithdrawal.service.js";
+import { resolveWithdrawalEligibility } from "../../service/withdrawalEligibility.service.js";
 import {
     normalizeOperatingMode,
     parseEventReference
@@ -211,6 +213,201 @@ const defaultPaymentCallbackHandlerDeps = {
     resolvePartnerModeForDepositImpl: resolvePartnerModeForDeposit
 };
 
+const buildWithdrawalPolicyMetadata = (withdrawalPolicy, amount) => ({
+    amount,
+    currentBalance: withdrawalPolicy.currentBalance,
+    liveMinBalanceKes: withdrawalPolicy.liveMinBalanceKes,
+    minAutoSavingsDays: withdrawalPolicy.minAutoSavingsDays,
+    liveAutoSavingsLinkCount: withdrawalPolicy.liveAutoSavingsLinkCount,
+    matureLiveAutoSavingsLinkCount: withdrawalPolicy.matureLiveAutoSavingsLinkCount,
+    earliestAutoSavingsEnabledAt: withdrawalPolicy.earliestAutoSavingsEnabledAt,
+    firstEligibleAt: withdrawalPolicy.firstEligibleAt,
+    hasLiveWalletActivity: withdrawalPolicy.hasLiveWalletActivity
+});
+
+const executeWithdrawalFlow = async ({
+    userId,
+    phone,
+    amount,
+    idempotencyKey,
+    notes = null,
+    partnerContext = null
+}) => {
+    const withdrawalPolicy = await resolveWithdrawalEligibility({ userId });
+    const partnerName = partnerContext?.partnerName || null;
+    const paymentContext = partnerContext
+        ? {
+            partnerId: partnerContext.partnerId,
+            partnerName,
+            requestedByType: "PARTNER"
+        }
+        : {
+            requestedByType: "USER"
+        };
+
+    await recordOperationalLogSafe({
+        category: "PAYMENT",
+        action: withdrawalPolicy.eligible
+            ? "WITHDRAWAL_POLICY_ELIGIBLE"
+            : "WITHDRAWAL_POLICY_BLOCKED",
+        level: withdrawalPolicy.eligible ? "INFO" : "WARN",
+        status: withdrawalPolicy.eligible ? "ELIGIBLE" : "FAILED",
+        message: withdrawalPolicy.eligible
+            ? `Withdrawal policy approved for user ${userId}`
+            : `Withdrawal policy blocked for user ${userId}: ${withdrawalPolicy.denialReason}`,
+        targetType: "WITHDRAWAL_POLICY",
+        targetId: String(userId),
+        userId,
+        partnerName,
+        operatingMode: withdrawalPolicy.operatingMode,
+        metadata: buildWithdrawalPolicyMetadata(withdrawalPolicy, amount)
+    });
+
+    if (!withdrawalPolicy.eligible) {
+        return {
+            statusCode: 403,
+            body: {
+                status: "FAILED",
+                reason: withdrawalPolicy.denialReason
+            }
+        };
+    }
+
+    const { paymentTransaction, withdrawalRequest } = await createWithdrawalRequest({
+        userId,
+        phone,
+        amount,
+        idempotencyKey,
+        notes,
+        withdrawalPolicy,
+        paymentContext
+    });
+
+    let providerAck = null;
+
+    if (!paymentTransaction.providerRequestId && paymentTransaction.status === "PENDING") {
+        if (!isDarajaDisbursementEnabled()) {
+            await recordOperationalLogSafe({
+                category: "PAYMENT",
+                action: "WITHDRAWAL_DISBURSEMENT_CONFIG_MISSING",
+                level: "ERROR",
+                status: "FAILED",
+                message: `Withdrawal ${paymentTransaction._id} cannot be submitted because Daraja B2C configuration is missing`,
+                targetType: "PAYMENT_TRANSACTION",
+                targetId: String(paymentTransaction._id),
+                userId,
+                partnerName,
+                paymentTransactionId: paymentTransaction._id,
+                withdrawalRequestId: withdrawalRequest._id,
+                operatingMode: withdrawalPolicy.operatingMode,
+                metadata: {
+                    amount: paymentTransaction.amount
+                }
+            });
+            await markWithdrawalFailed({
+                withdrawalRequestId: withdrawalRequest._id,
+                failureReason: "Daraja disbursement configuration is missing"
+            });
+
+            return {
+                statusCode: 503,
+                body: {
+                    status: "FAILED",
+                    reason: "Daraja disbursement configuration is missing"
+                }
+            };
+        }
+
+        try {
+            const withdrawalOccasion = `BETSAVE_WD_${withdrawalRequest._id}`;
+            paymentTransaction.externalRef = paymentTransaction.externalRef || withdrawalOccasion;
+
+            providerAck = await initiateB2C({
+                phone: paymentTransaction.phone,
+                amount: paymentTransaction.amount,
+                remarks: "Betsave withdrawal",
+                occasion: withdrawalOccasion,
+                timeoutUrl: buildSignedCallbackUrl({
+                    baseUrl: process.env.DARAJA_B2C_TIMEOUT_URL,
+                    callbackType: "withdrawal",
+                    resourceId: withdrawalRequest._id
+                }),
+                resultUrl: buildSignedCallbackUrl({
+                    baseUrl: process.env.DARAJA_B2C_RESULT_URL,
+                    callbackType: "withdrawal",
+                    resourceId: withdrawalRequest._id
+                })
+            });
+
+            paymentTransaction.providerRequestId = providerAck.originatorConversationId || paymentTransaction.providerRequestId;
+            paymentTransaction.providerTransactionId = providerAck.conversationId || paymentTransaction.providerTransactionId;
+            paymentTransaction.providerResponse = providerAck.raw || paymentTransaction.providerResponse;
+            await paymentTransaction.save();
+
+            await recordOperationalLogSafe({
+                category: "PAYMENT",
+                action: "WITHDRAWAL_PROVIDER_REQUESTED",
+                level: "INFO",
+                status: paymentTransaction.status,
+                message: `Submitted withdrawal ${paymentTransaction._id} to Daraja B2C`,
+                targetType: "PAYMENT_TRANSACTION",
+                targetId: String(paymentTransaction._id),
+                userId,
+                partnerName,
+                paymentTransactionId: paymentTransaction._id,
+                withdrawalRequestId: withdrawalRequest._id,
+                operatingMode: withdrawalPolicy.operatingMode,
+                externalRef: paymentTransaction.externalRef,
+                metadata: {
+                    amount: paymentTransaction.amount,
+                    providerRequestId: paymentTransaction.providerRequestId,
+                    providerTransactionId: paymentTransaction.providerTransactionId,
+                    providerResponse: providerAck.raw || null
+                }
+            });
+        } catch (error) {
+            await markWithdrawalFailed({
+                withdrawalRequestId: withdrawalRequest._id,
+                failureReason: error.message
+            });
+            throw error;
+        }
+    }
+
+    await recordOperationalLogSafe({
+        category: "PAYMENT",
+        action: "WITHDRAWAL_CREATED",
+        level: "INFO",
+        status: paymentTransaction.status,
+        message: `Created withdrawal transaction ${paymentTransaction._id}`,
+        targetType: "PAYMENT_TRANSACTION",
+        targetId: String(paymentTransaction._id),
+        userId,
+        partnerName,
+        paymentTransactionId: paymentTransaction._id,
+        withdrawalRequestId: withdrawalRequest._id,
+        operatingMode: withdrawalPolicy.operatingMode,
+        externalRef: paymentTransaction.externalRef,
+        metadata: {
+            ...buildWithdrawalPolicyMetadata(withdrawalPolicy, paymentTransaction.amount),
+            providerRequestId: paymentTransaction.providerRequestId,
+            providerTransactionId: paymentTransaction.providerTransactionId,
+            providerResponse: providerAck?.raw || null,
+            requestedByType: paymentTransaction.requestedByType
+        }
+    });
+
+    return {
+        statusCode: 201,
+        body: {
+            status: "SUCCESS",
+            paymentTransaction,
+            withdrawalRequest,
+            providerAck
+        }
+    };
+};
+
 export const createDeposit = async (req, res) => {
     try {
         const { userId } = req.params;
@@ -353,8 +550,7 @@ export const createWithdrawal = async (req, res) => {
                 reason: "idempotencyKey is required"
             });
         }
-
-        const { paymentTransaction, withdrawalRequest } = await createWithdrawalRequest({
+        const result = await executeWithdrawalFlow({
             userId,
             phone,
             amount,
@@ -362,81 +558,7 @@ export const createWithdrawal = async (req, res) => {
             notes
         });
 
-        let providerAck = null;
-
-        if (!paymentTransaction.providerRequestId && paymentTransaction.status === "PENDING") {
-            if (!isDarajaDisbursementEnabled()) {
-                await markWithdrawalFailed({
-                    withdrawalRequestId: withdrawalRequest._id,
-                    failureReason: "Daraja disbursement configuration is missing"
-                });
-
-                return res.status(503).json({
-                    status: "FAILED",
-                    reason: "Daraja disbursement configuration is missing"
-                });
-            }
-
-            try {
-                const withdrawalOccasion = `BETSAVE_WD_${withdrawalRequest._id}`;
-                paymentTransaction.externalRef = paymentTransaction.externalRef || withdrawalOccasion;
-
-                providerAck = await initiateB2C({
-                    phone: paymentTransaction.phone,
-                    amount: paymentTransaction.amount,
-                    remarks: "Betsave withdrawal",
-                    occasion: withdrawalOccasion,
-                    timeoutUrl: buildSignedCallbackUrl({
-                        baseUrl: process.env.DARAJA_B2C_TIMEOUT_URL,
-                        callbackType: "withdrawal",
-                        resourceId: withdrawalRequest._id
-                    }),
-                    resultUrl: buildSignedCallbackUrl({
-                        baseUrl: process.env.DARAJA_B2C_RESULT_URL,
-                        callbackType: "withdrawal",
-                        resourceId: withdrawalRequest._id
-                    })
-                });
-
-                paymentTransaction.providerRequestId = providerAck.originatorConversationId || paymentTransaction.providerRequestId;
-                paymentTransaction.providerTransactionId = providerAck.conversationId || paymentTransaction.providerTransactionId;
-                paymentTransaction.providerResponse = providerAck.raw || paymentTransaction.providerResponse;
-                await paymentTransaction.save();
-            } catch (error) {
-                await markWithdrawalFailed({
-                    withdrawalRequestId: withdrawalRequest._id,
-                    failureReason: error.message
-                });
-                throw error;
-            }
-        }
-
-        await recordOperationalLogSafe({
-            category: "PAYMENT",
-            action: "WITHDRAWAL_CREATED",
-            level: "INFO",
-            status: paymentTransaction.status,
-            message: `Created withdrawal transaction ${paymentTransaction._id}`,
-            targetType: "PAYMENT_TRANSACTION",
-            targetId: String(paymentTransaction._id),
-            userId,
-            paymentTransactionId: paymentTransaction._id,
-            withdrawalRequestId: withdrawalRequest._id,
-            externalRef: paymentTransaction.externalRef,
-            metadata: {
-                amount: paymentTransaction.amount,
-                providerRequestId: paymentTransaction.providerRequestId,
-                providerTransactionId: paymentTransaction.providerTransactionId,
-                providerResponse: providerAck?.raw || null
-            }
-        });
-
-        return res.status(201).json({
-            status: "SUCCESS",
-            paymentTransaction,
-            withdrawalRequest,
-            providerAck
-        });
+        return res.status(result.statusCode).json(result.body);
     } catch (error) {
         await recordOperationalLogSafe({
             category: "PAYMENT",
@@ -448,7 +570,98 @@ export const createWithdrawal = async (req, res) => {
             targetId: String(req.params?.userId || ""),
             userId: req.params?.userId || null,
             metadata: {
-                error: error.message
+                error: error.message,
+                amount: req.body?.amount ?? null
+            }
+        });
+        return res.status(400).json({
+            status: "FAILED",
+            reason: error.message
+        });
+    }
+};
+
+export const createPartnerWithdrawal = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        if (!req.partner?.id || !req.partner?.name) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Partner not authenticated"
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "Invalid user id"
+            });
+        }
+
+        const {
+            phone = null,
+            amount,
+            idempotencyKey,
+            notes = null
+        } = req.body || {};
+
+        if (!idempotencyKey) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "idempotencyKey is required"
+            });
+        }
+
+        const partnerUser = await PartnerUser.findOne({
+            partnerId: req.partner.id,
+            userId,
+            status: { $in: ["VERIFIED", "ACTIVE"] }
+        }).select("phoneNumber status");
+
+        if (!partnerUser) {
+            return res.status(404).json({
+                status: "FAILED",
+                reason: "Partner-linked user not found or not active"
+            });
+        }
+
+        const normalizedPhone = String(phone || partnerUser.phoneNumber || "").trim();
+        if (phone && normalizedPhone !== String(partnerUser.phoneNumber || "").trim()) {
+            return res.status(400).json({
+                status: "FAILED",
+                reason: "Provided phone does not match the linked partner user"
+            });
+        }
+
+        const result = await executeWithdrawalFlow({
+            userId,
+            phone: normalizedPhone,
+            amount,
+            idempotencyKey,
+            notes,
+            partnerContext: {
+                partnerId: req.partner.id,
+                partnerName: req.partner.name
+            }
+        });
+
+        return res.status(result.statusCode).json(result.body);
+    } catch (error) {
+        await recordOperationalLogSafe({
+            category: "PAYMENT",
+            action: "PARTNER_WITHDRAWAL_REJECTED",
+            level: "ERROR",
+            status: "FAILED",
+            message: `Partner withdrawal request failed: ${error.message}`,
+            targetType: "WITHDRAWAL_REQUEST",
+            targetId: String(req.params?.userId || ""),
+            userId: req.params?.userId || null,
+            partnerName: req.partner?.name || null,
+            operatingMode: req.partner?.operatingMode || null,
+            metadata: {
+                error: error.message,
+                amount: req.body?.amount ?? null
             }
         });
         return res.status(400).json({
@@ -693,13 +906,15 @@ export const createPaymentCallbackHandlers = (deps = {}) => {
                 targetType: "PAYMENT_TRANSACTION",
                 targetId: String(paymentTransaction._id),
                 userId: paymentTransaction.userId,
+                partnerName: paymentTransaction.partnerName || null,
                 paymentTransactionId: paymentTransaction._id,
                 withdrawalRequestId: withdrawalRequest._id,
                 externalRef: paymentTransaction.externalRef,
                 metadata: {
                     providerRequestId: paymentTransaction.providerRequestId,
                     providerTransactionId: paymentTransaction.providerTransactionId,
-                    failureReason: parsed.failureReason || null
+                    failureReason: parsed.failureReason || null,
+                    requestedByType: paymentTransaction.requestedByType || "USER"
                 }
             });
 

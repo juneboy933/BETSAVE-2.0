@@ -37,6 +37,12 @@ export const registerPartnerUser = async ({ partner, phone, autoSavingsEnabled }
                 );
             }
 
+            let existingPartnerUserQuery = PartnerUser.findOne({ partnerId: partner.id, userId: user._id });
+            if (session) {
+                existingPartnerUserQuery = existingPartnerUserQuery.session(session);
+            }
+            const existingPartnerUser = await existingPartnerUserQuery;
+
             const update = {
                 partnerId: partner.id,
                 partnerName: partner.name,
@@ -47,6 +53,9 @@ export const registerPartnerUser = async ({ partner, phone, autoSavingsEnabled }
             };
             if (typeof autoSavingsEnabled === "boolean") {
                 update.autoSavingsEnabled = autoSavingsEnabled;
+                update.autoSavingsEnabledAt = autoSavingsEnabled
+                    ? (existingPartnerUser?.autoSavingsEnabledAt || new Date())
+                    : null;
             }
 
             const partnerUser = await PartnerUser.findOneAndUpdate(

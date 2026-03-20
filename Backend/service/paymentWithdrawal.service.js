@@ -3,6 +3,9 @@ import Wallet from "../database/models/wallet.model.js";
 import WithdrawalRequest from "../database/models/withdrawalRequest.model.js";
 import { postLedger } from "./postLedger.service.js";
 import { runInTransaction } from "./databaseSession.service.js";
+import {
+    getLiveWithdrawalMinBalanceKes
+} from "./withdrawalEligibility.service.js";
 
 const KENYA_PHONE_REGEX = /^\+254\d{9}$/;
 
@@ -11,7 +14,6 @@ const parsePositiveNumber = (value, fallback) => {
     const numeric = Number(value);
     return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
 };
-const MIN_WITHDRAWAL_KES = parsePositiveNumber(process.env.WITHDRAWAL_MIN_KES, 100);
 
 const validateAmount = (amount) => {
     const value = Number(amount);
@@ -25,7 +27,15 @@ const buildReserveEventId = (withdrawalRequestId) => `WITHDRAWAL_${withdrawalReq
 const buildDisburseEventId = (withdrawalRequestId) => `WITHDRAWAL_${withdrawalRequestId}_DISBURSE`;
 const buildReverseEventId = (withdrawalRequestId) => `WITHDRAWAL_${withdrawalRequestId}_REVERSE`;
 
-export const createWithdrawalRequest = async ({ userId, phone, amount, idempotencyKey, notes = null }) => {
+export const createWithdrawalRequest = async ({
+    userId,
+    phone,
+    amount,
+    idempotencyKey,
+    notes = null,
+    withdrawalPolicy = null,
+    paymentContext = null
+}) => {
     if (!idempotencyKey) {
         throw new Error("idempotencyKey is required");
     }
@@ -36,9 +46,6 @@ export const createWithdrawalRequest = async ({ userId, phone, amount, idempoten
     }
 
     const withdrawalAmount = validateAmount(amount);
-    if (withdrawalAmount < MIN_WITHDRAWAL_KES) {
-        throw new Error(`Minimum withdrawal amount is KES ${MIN_WITHDRAWAL_KES}`);
-    }
 
     const existingPaymentTx = await PaymentTransaction.findOne({ idempotencyKey });
     if (existingPaymentTx) {
@@ -48,8 +55,22 @@ export const createWithdrawalRequest = async ({ userId, phone, amount, idempoten
 
     const wallet = await Wallet.findOne({ userId }).lean();
     const currentBalance = Number(wallet?.balance || 0);
-    if (currentBalance < MIN_WITHDRAWAL_KES) {
-        throw new Error(`Minimum wallet balance to withdraw is KES ${MIN_WITHDRAWAL_KES}`);
+    const policy = withdrawalPolicy && typeof withdrawalPolicy === "object" ? withdrawalPolicy : null;
+    const context = paymentContext && typeof paymentContext === "object" ? paymentContext : null;
+    const operatingMode = String(policy?.operatingMode || "demo").trim().toLowerCase() === "live"
+        ? "live"
+        : "demo";
+    const liveMinBalanceKes = parsePositiveNumber(
+        policy?.liveMinBalanceKes,
+        getLiveWithdrawalMinBalanceKes()
+    );
+
+    if (policy?.eligible === false) {
+        throw new Error(String(policy.denialReason || "Withdrawal is not eligible"));
+    }
+
+    if (operatingMode === "live" && currentBalance < liveMinBalanceKes) {
+        throw new Error(`Live withdrawals require a wallet balance of at least KES ${liveMinBalanceKes}`);
     }
     if (currentBalance < withdrawalAmount) {
         throw new Error("Insufficient wallet balance");
@@ -64,6 +85,12 @@ export const createWithdrawalRequest = async ({ userId, phone, amount, idempoten
                 channel: "B2C",
                 status: "INITIATED",
                 userId,
+                partnerId: context?.partnerId || null,
+                partnerName: context?.partnerName || null,
+                requestedByType:
+                    String(context?.requestedByType || "").trim().toUpperCase() === "PARTNER"
+                        ? "PARTNER"
+                        : "USER",
                 phone: normalizedPhone,
                 amount: withdrawalAmount,
                 currency: "KES",

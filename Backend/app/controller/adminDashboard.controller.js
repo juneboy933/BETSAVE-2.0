@@ -1105,10 +1105,14 @@ export const getAdminOperations = async (req, res) => {
             stalePendingWithdrawals,
             successfulUnsettledDeposits,
             settledDepositsLastDay,
+            successfulWithdrawalsLastDay,
+            failedWithdrawalsLastDay,
+            partnerInitiatedWithdrawalsLastDay,
             workerStatuses,
             recentOperationalLogs,
             operationalLogSummary,
-            recentReconciliationRuns
+            recentReconciliationRuns,
+            recentWithdrawals
         ] = await Promise.all([
             Event.countDocuments({ status: "FAILED", operatingMode }),
             Partner.countDocuments({ status: "SUSPENDED" }),
@@ -1137,6 +1141,54 @@ export const getAdminOperations = async (req, res) => {
                         type: "DEPOSIT",
                         settlementStatus: "SETTLED",
                         settledAt: { $gte: observabilityWindowStart }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalAmount: { $sum: "$amount" },
+                        count: { $sum: 1 }
+                    }
+                }
+            ]),
+            PaymentTransaction.aggregate([
+                {
+                    $match: {
+                        type: "WITHDRAWAL",
+                        status: "SUCCESS",
+                        updatedAt: { $gte: observabilityWindowStart }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalAmount: { $sum: "$amount" },
+                        count: { $sum: 1 }
+                    }
+                }
+            ]),
+            PaymentTransaction.aggregate([
+                {
+                    $match: {
+                        type: "WITHDRAWAL",
+                        status: "FAILED",
+                        updatedAt: { $gte: observabilityWindowStart }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalAmount: { $sum: "$amount" },
+                        count: { $sum: 1 }
+                    }
+                }
+            ]),
+            PaymentTransaction.aggregate([
+                {
+                    $match: {
+                        type: "WITHDRAWAL",
+                        requestedByType: "PARTNER",
+                        createdAt: { $gte: observabilityWindowStart }
                     }
                 },
                 {
@@ -1179,6 +1231,11 @@ export const getAdminOperations = async (req, res) => {
             ReconciliationRun.find({})
                 .sort({ createdAt: -1 })
                 .limit(10)
+                .lean(),
+            PaymentTransaction.find({ type: "WITHDRAWAL" })
+                .sort({ createdAt: -1 })
+                .limit(10)
+                .select("status amount phone partnerName requestedByType providerRequestId providerTransactionId failureReason createdAt updatedAt")
                 .lean()
         ]);
 
@@ -1301,6 +1358,21 @@ export const getAdminOperations = async (req, res) => {
                         count: settledDepositsLastDay[0]?.count || 0,
                         totalAmount: clampNonNegative(settledDepositsLastDay[0]?.totalAmount)
                     }
+                },
+                withdrawals: {
+                    stalePendingCount: stalePendingWithdrawals,
+                    succeededLast24Hours: {
+                        count: successfulWithdrawalsLastDay[0]?.count || 0,
+                        totalAmount: clampNonNegative(successfulWithdrawalsLastDay[0]?.totalAmount)
+                    },
+                    failedLast24Hours: {
+                        count: failedWithdrawalsLastDay[0]?.count || 0,
+                        totalAmount: clampNonNegative(failedWithdrawalsLastDay[0]?.totalAmount)
+                    },
+                    partnerInitiatedLast24Hours: {
+                        count: partnerInitiatedWithdrawalsLastDay[0]?.count || 0,
+                        totalAmount: clampNonNegative(partnerInitiatedWithdrawalsLastDay[0]?.totalAmount)
+                    }
                 }
             },
             integrationReadiness,
@@ -1330,7 +1402,11 @@ export const getAdminOperations = async (req, res) => {
                     withdrawalRequestId: log.withdrawalRequestId || null,
                     metadata: sanitizeStructuredData(log.metadata || {})
                 })),
-                recentReconciliationRuns
+                recentReconciliationRuns,
+                recentWithdrawals: recentWithdrawals.map((item) => ({
+                    ...item,
+                    phone: maskPhoneForDisplay(item.phone)
+                }))
             },
             roadmap: {
                 nextMilestones: [
