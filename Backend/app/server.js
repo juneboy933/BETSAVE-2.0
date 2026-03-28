@@ -21,6 +21,9 @@ const app = express();
 let server;
 const isProduction = String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
 
+// Respect Render/nginx forwarded headers so rate limiting and logs use the real client IP.
+app.set("trust proxy", 1);
+
 const terminateProcess = (error, context) => {
     logger.error(`[startup] ${context}`, { error: error?.stack || error?.message || String(error) });
     if (server) {

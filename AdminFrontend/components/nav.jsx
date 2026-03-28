@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+const ADMIN_BASE_PATH = String(process.env.NEXT_PUBLIC_BASE_PATH || "").trim().replace(/\/+$/, "");
 const links = [
   { href: "/access", label: "Access" },
   { href: "/", label: "Overview" },
@@ -14,7 +15,12 @@ const links = [
 ];
 
 export default function Nav() {
-  const path = usePathname();
+  const pathname = usePathname();
+  const path =
+    ADMIN_BASE_PATH && pathname.startsWith(ADMIN_BASE_PATH)
+      ? pathname.slice(ADMIN_BASE_PATH.length) || "/"
+      : pathname;
+
   return (
     <nav className="flex flex-wrap gap-2">
       {links.map((link) => {

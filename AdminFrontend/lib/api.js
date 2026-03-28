@@ -1,6 +1,6 @@
 "use client";
 
-const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
+const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 const DEFAULT_ADMIN_MODE = "live";
 const ADMIN_SESSION_FLAG = "admin_session_active";
 const ADMIN_RATE_LIMIT_BACKOFF_MS = 30000;
@@ -8,6 +8,7 @@ let adminDashboardToken = ""; // in-memory only; browser session auth relies on 
 let adminDashboardRateLimitedUntil = 0;
 const canUseStorage = () => typeof window !== "undefined" && typeof localStorage !== "undefined";
 const canUseSessionStorage = () => typeof window !== "undefined" && typeof sessionStorage !== "undefined";
+const getBrowserOrigin = () => (typeof window !== "undefined" ? window.location.origin : "");
 const normalizeApiBase = (value) => String(value || DEFAULT_API).trim().replace(/\/+$/, "");
 
 const buildRequestUrl = (path) => {
@@ -16,7 +17,7 @@ const buildRequestUrl = (path) => {
 };
 
 export const getApiBase = () =>
-  normalizeApiBase((canUseStorage() ? localStorage.getItem("admin_api_base") : null) || DEFAULT_API);
+  normalizeApiBase((canUseStorage() ? localStorage.getItem("admin_api_base") : null) || DEFAULT_API || getBrowserOrigin());
 export const setApiBase = (value) => {
   if (!canUseStorage()) return;
   localStorage.setItem("admin_api_base", normalizeApiBase(value));

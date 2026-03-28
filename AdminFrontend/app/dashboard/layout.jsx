@@ -13,6 +13,7 @@ import {
 } from "../../lib/api";
 import { attachVisiblePolling } from "../../lib/polling";
 
+const ADMIN_BASE_PATH = String(process.env.NEXT_PUBLIC_BASE_PATH || "").trim().replace(/\/+$/, "");
 const navLinks = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/access", label: "Access", primaryAdminOnly: true },
@@ -25,7 +26,11 @@ const navLinks = [
 ];
 
 export default function AdminDashboardLayout({ children }) {
-  const pathname = usePathname();
+  const rawPathname = usePathname();
+  const pathname =
+    ADMIN_BASE_PATH && rawPathname.startsWith(ADMIN_BASE_PATH)
+      ? rawPathname.slice(ADMIN_BASE_PATH.length) || "/"
+      : rawPathname;
   const router = useRouter();
   const [navOpen, setNavOpen] = useState(false);
   const [operatingMode, setOperatingModeState] = useState("live");
@@ -75,7 +80,7 @@ export default function AdminDashboardLayout({ children }) {
 
   useEffect(() => {
     setNavOpen(false);
-  }, [pathname]);
+  }, [rawPathname]);
 
   const switchOperatingMode = async (nextMode) => {
     const targetMode = String(nextMode || "").trim().toLowerCase() === "demo" ? "demo" : "live";
