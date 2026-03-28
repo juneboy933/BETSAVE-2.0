@@ -68,7 +68,7 @@ const eventSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
-eventSchema.index({ partnerName: 1, eventId: 1 }, { unique: true });
+eventSchema.index({ partnerName: 1, operatingMode: 1, eventId: 1 }, { unique: true });
 eventSchema.index({ partnerName: 1, operatingMode: 1, createdAt: -1 });
 eventSchema.index({ userId: 1, createdAt: -1 });
 eventSchema.index({ status: 1, operatingMode: 1, updatedAt: -1 });

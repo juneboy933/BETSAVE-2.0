@@ -216,12 +216,16 @@ const defaultPaymentCallbackHandlerDeps = {
 const buildWithdrawalPolicyMetadata = (withdrawalPolicy, amount) => ({
     amount,
     currentBalance: withdrawalPolicy.currentBalance,
+    availableBalance: withdrawalPolicy.availableBalance,
+    walletBalance: withdrawalPolicy.walletBalance,
+    demoAttributedBalance: withdrawalPolicy.demoAttributedBalance,
     liveMinBalanceKes: withdrawalPolicy.liveMinBalanceKes,
     minAutoSavingsDays: withdrawalPolicy.minAutoSavingsDays,
     liveAutoSavingsLinkCount: withdrawalPolicy.liveAutoSavingsLinkCount,
     matureLiveAutoSavingsLinkCount: withdrawalPolicy.matureLiveAutoSavingsLinkCount,
     earliestAutoSavingsEnabledAt: withdrawalPolicy.earliestAutoSavingsEnabledAt,
     firstEligibleAt: withdrawalPolicy.firstEligibleAt,
+    partnerNameScope: withdrawalPolicy.partnerNameScope,
     hasLiveWalletActivity: withdrawalPolicy.hasLiveWalletActivity
 });
 
@@ -233,12 +237,17 @@ const executeWithdrawalFlow = async ({
     notes = null,
     partnerContext = null
 }) => {
-    const withdrawalPolicy = await resolveWithdrawalEligibility({ userId });
+    const withdrawalPolicy = await resolveWithdrawalEligibility({
+        userId,
+        preferredOperatingMode: partnerContext?.operatingMode || null,
+        partnerName: partnerContext?.partnerName || null
+    });
     const partnerName = partnerContext?.partnerName || null;
     const paymentContext = partnerContext
         ? {
             partnerId: partnerContext.partnerId,
             partnerName,
+            operatingMode: partnerContext.operatingMode || withdrawalPolicy.operatingMode,
             requestedByType: "PARTNER"
         }
         : {
@@ -642,7 +651,8 @@ export const createPartnerWithdrawal = async (req, res) => {
             notes,
             partnerContext: {
                 partnerId: req.partner.id,
-                partnerName: req.partner.name
+                partnerName: req.partner.name,
+                operatingMode: req.partner.operatingMode || "demo"
             }
         });
 

@@ -3,18 +3,25 @@ import Partner from "../database/models/partner.model.js";
 import PartnerUser from "../database/models/partnerUser.model.js";
 import User from "../database/models/user.model.js";
 
+const isDuplicateKeyError = (error) => error?.code === 11000;
+
+const createEventSafely = async (payload) => {
+    try {
+        return await Event.create(payload);
+    } catch (error) {
+        if (isDuplicateKeyError(error)) {
+            return null;
+        }
+        throw error;
+    }
+};
+
 export const ingestEvent = async (incomingEvent) => {
     const { eventId, phone, partnerName, type = "BET_PLACED", amount } = incomingEvent;
 
-    // Idempotency check
-    const existing = await Event.findOne({ eventId, partnerName });
-    if (existing) {
-        return { status: "SKIPPED", reason: "Event already processed" };
-    }
-
     const partner = await Partner.findOne({ name: partnerName }).select("_id name operatingMode");
     if (!partner) {
-        await Event.create({
+        await createEventSafely({
             eventId,
             userId: null,
             type,
@@ -32,10 +39,15 @@ export const ingestEvent = async (incomingEvent) => {
         ? "live"
         : "demo";
 
+    const existing = await Event.findOne({ eventId, partnerName, operatingMode: eventMode });
+    if (existing) {
+        return { status: "SKIPPED", reason: "Event already processed" };
+    }
+
     // Find user
     const user = await User.findOne({ phoneNumber: phone });
     if (!user || !user.verified) {
-        await Event.create({
+        const createdEvent = await createEventSafely({
             eventId,
             userId: user?._id || null,
             type,
@@ -46,12 +58,16 @@ export const ingestEvent = async (incomingEvent) => {
             status: "FAILED"
         });
 
+        if (!createdEvent) {
+            return { status: "SKIPPED", reason: "Event already processed" };
+        }
+
         return { status: "FAILED", reason: "User not found or not verified" };
     }
 
     const partnerUser = await PartnerUser.findOne({ partnerId: partner._id, userId: user._id });
     if (!partnerUser) {
-        await Event.create({
+        const createdEvent = await createEventSafely({
             eventId,
             userId: user._id,
             type,
@@ -61,12 +77,16 @@ export const ingestEvent = async (incomingEvent) => {
             amount,
             status: "FAILED"
         });
+
+        if (!createdEvent) {
+            return { status: "SKIPPED", reason: "Event already processed" };
+        }
 
         return { status: "FAILED", reason: "User is not linked to this partner" };
     }
 
     if (partnerUser.status !== "VERIFIED" && partnerUser.status !== "ACTIVE") {
-        await Event.create({
+        const createdEvent = await createEventSafely({
             eventId,
             userId: user._id,
             type,
@@ -76,12 +96,16 @@ export const ingestEvent = async (incomingEvent) => {
             amount,
             status: "FAILED"
         });
+
+        if (!createdEvent) {
+            return { status: "SKIPPED", reason: "Event already processed" };
+        }
 
         return { status: "FAILED", reason: "User is pending verification for this partner" };
     }
 
     if (!partnerUser.autoSavingsEnabled) {
-        await Event.create({
+        const createdEvent = await createEventSafely({
             eventId,
             userId: user._id,
             type,
@@ -92,11 +116,15 @@ export const ingestEvent = async (incomingEvent) => {
             status: "FAILED"
         });
 
+        if (!createdEvent) {
+            return { status: "SKIPPED", reason: "Event already processed" };
+        }
+
         return { status: "FAILED", reason: "Auto-savings is not enabled for this user" };
     }
 
     // Record event as RECEIVED
-    const createdEvent = await Event.create({
+    const createdEvent = await createEventSafely({
         eventId,
         userId: user._id,
         phone,
@@ -106,6 +134,10 @@ export const ingestEvent = async (incomingEvent) => {
         amount,
         status: "RECEIVED"
     });
+
+    if (!createdEvent) {
+        return { status: "SKIPPED", reason: "Event already processed" };
+    }
 
     return {
         status: "RECEIVED",

@@ -62,6 +62,12 @@ const signature = crypto
   .digest("hex");
 ```
 
+Partner webhook callbacks from Betsave use the same canonical signing format:
+
+```text
+{timestamp}{HTTP_METHOD}{REQUEST_PATH}{JSON_BODY}
+```
+
 ## Live-Mode Protection
 
 When a partner is in `live` mode, these write endpoints also require:

@@ -4,9 +4,12 @@ import PartnerUser from "../database/models/partnerUser.model.js";
 import Partner from "../database/models/partner.model.js";
 import PaymentTransaction from "../database/models/paymentTransaction.model.js";
 import Wallet from "../database/models/wallet.model.js";
+import Ledger from "../database/models/ledger.model.js";
+import { normalizeOperatingMode } from "./eventReference.service.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LIVE_LINK_STATUSES = ["VERIFIED", "ACTIVE"];
+const DEMO_ATTRIBUTION_REFERENCE_REGEX = /^EVENT::.*::demo::/;
 
 const parsePositiveNumber = (value, fallback) => {
     const numeric = Number(value);
@@ -18,6 +21,18 @@ const normalizeDate = (value) => {
     return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
 };
 
+const clampNonNegative = (value) => Math.max(0, Number(value) || 0);
+const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const buildDemoAttributionReferenceRegex = (partnerName = null) => {
+    const normalizedPartnerName = String(partnerName || "").trim();
+    if (!normalizedPartnerName) {
+        return DEMO_ATTRIBUTION_REFERENCE_REGEX;
+    }
+
+    return new RegExp(`^EVENT::${escapeRegex(normalizedPartnerName)}::demo::`);
+};
+
 export const getLiveWithdrawalMinBalanceKes = () =>
     parsePositiveNumber(process.env.LIVE_WITHDRAWAL_MIN_BALANCE_KES, 100);
 
@@ -26,14 +41,20 @@ export const getLiveWithdrawalMinAutoSavingsDays = () =>
 
 export const evaluateWithdrawalEligibilitySnapshot = ({
     currentBalance,
+    availableBalance = currentBalance,
+    walletBalance = currentBalance,
+    demoAttributedBalance = 0,
     hasLiveWalletActivity,
     liveAutoSavingsLinks,
     now = new Date(),
+    preferredOperatingMode = null,
+    partnerNameScope = null,
     liveMinBalanceKes = getLiveWithdrawalMinBalanceKes(),
     minAutoSavingsDays = getLiveWithdrawalMinAutoSavingsDays()
 }) => {
     const normalizedNow = normalizeDate(now) || new Date();
-    const normalizedBalance = Math.max(0, Number(currentBalance) || 0);
+    const normalizedWalletBalance = clampNonNegative(walletBalance);
+    const normalizedDemoAttributedBalance = clampNonNegative(demoAttributedBalance);
     const normalizedLinks = Array.isArray(liveAutoSavingsLinks)
         ? liveAutoSavingsLinks
             .map((link) => {
@@ -54,7 +75,12 @@ export const evaluateWithdrawalEligibilitySnapshot = ({
             .filter(Boolean)
         : [];
 
-    const operatingMode = hasLiveWalletActivity || normalizedLinks.length ? "live" : "demo";
+    const forcedOperatingMode = normalizeOperatingMode(preferredOperatingMode);
+    const operatingMode = forcedOperatingMode || (hasLiveWalletActivity || normalizedLinks.length ? "live" : "demo");
+    const normalizedAvailableBalance = clampNonNegative(
+        availableBalance ??
+            (operatingMode === "live" ? normalizedWalletBalance : normalizedDemoAttributedBalance)
+    );
     const maturityCutoff = new Date(normalizedNow.getTime() - (minAutoSavingsDays * DAY_MS));
     const matureLinks = normalizedLinks.filter((link) => link.autoSavingsEnabledAt <= maturityCutoff);
     const earliestEnabledAt = normalizedLinks
@@ -66,7 +92,7 @@ export const evaluateWithdrawalEligibilitySnapshot = ({
 
     let denialReason = null;
     if (operatingMode === "live") {
-        if (normalizedBalance < liveMinBalanceKes) {
+        if (normalizedAvailableBalance < liveMinBalanceKes) {
             denialReason = `Live withdrawals require a wallet balance of at least KES ${liveMinBalanceKes}`;
         } else if (!normalizedLinks.length) {
             denialReason = "Live withdrawals require auto-savings to be enabled with an active live partner";
@@ -79,20 +105,27 @@ export const evaluateWithdrawalEligibilitySnapshot = ({
         operatingMode,
         eligible: !denialReason,
         denialReason,
-        currentBalance: normalizedBalance,
+        currentBalance: normalizedAvailableBalance,
+        availableBalance: normalizedAvailableBalance,
+        walletBalance: normalizedWalletBalance,
+        demoAttributedBalance: normalizedDemoAttributedBalance,
         hasLiveWalletActivity: Boolean(hasLiveWalletActivity),
         liveMinBalanceKes,
         minAutoSavingsDays,
         liveAutoSavingsLinkCount: normalizedLinks.length,
         matureLiveAutoSavingsLinkCount: matureLinks.length,
         earliestAutoSavingsEnabledAt: earliestEnabledAt,
-        firstEligibleAt
+        firstEligibleAt,
+        partnerNameScope: String(partnerNameScope || "").trim() || null
     };
 };
 
 export const resolveWithdrawalEligibility = async ({
     userId,
+    preferredOperatingMode = null,
+    partnerName = null,
     walletModel = Wallet,
+    ledgerModel = Ledger,
     paymentTransactionModel = PaymentTransaction,
     partnerUserModel = PartnerUser,
     partnerModel = Partner,
@@ -103,8 +136,23 @@ export const resolveWithdrawalEligibility = async ({
     }
 
     const objectUserId = new mongoose.Types.ObjectId(userId);
-    const [wallet, hasLiveWalletActivity, liveAutoSavingsLinks] = await Promise.all([
+    const [wallet, demoAttributedBalanceResult, hasLiveWalletActivity, liveAutoSavingsLinks] = await Promise.all([
         walletModel.findOne({ userId: objectUserId }).select("balance").lean(),
+        ledgerModel.aggregate([
+            {
+                $match: {
+                    userId: objectUserId,
+                    account: "USER_WALLET_LIABILITY",
+                    reference: buildDemoAttributionReferenceRegex(partnerName)
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: "$amount" }
+                }
+            }
+        ]),
         paymentTransactionModel.exists({
             userId: objectUserId,
             type: "DEPOSIT",
@@ -150,10 +198,23 @@ export const resolveWithdrawalEligibility = async ({
         ])
     ]);
 
+    const resolvedOperatingMode =
+        normalizeOperatingMode(preferredOperatingMode) ||
+        (hasLiveWalletActivity || liveAutoSavingsLinks.length ? "live" : "demo");
+    const resolvedAvailableBalance =
+        resolvedOperatingMode === "demo"
+            ? demoAttributedBalanceResult[0]?.total || 0
+            : wallet?.balance || 0;
+
     return evaluateWithdrawalEligibilitySnapshot({
         currentBalance: wallet?.balance || 0,
+        availableBalance: resolvedAvailableBalance,
+        walletBalance: wallet?.balance || 0,
+        demoAttributedBalance: demoAttributedBalanceResult[0]?.total || 0,
         hasLiveWalletActivity: Boolean(hasLiveWalletActivity),
         liveAutoSavingsLinks,
-        now
+        now,
+        preferredOperatingMode,
+        partnerNameScope: partnerName
     });
 };

@@ -10,6 +10,7 @@
     "worker:webhook": "node worker/webhook.worker.js",
     "worker:recovery": "node worker/recovery.worker.js",
     "migrate:admin-invitations": "node migrateAdminInvitations.js",
+    "migrate:event-indexes": "node migrateEventIndexes.js",
     "test": "node --test --test-concurrency=1 --experimental-test-isolation=none"
   },
   "keywords": [],

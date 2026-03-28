@@ -1,7 +1,8 @@
 import PaymentTransaction from "../database/models/paymentTransaction.model.js";
 import { postLedger } from "./postLedger.service.js";
-import { runInTransaction } from "./databaseSession.service.js";
+import { runInRequiredTransaction, runInTransaction } from "./databaseSession.service.js";
 import { deriveDepositSettlementStatus } from "./paymentSettlement.service.js";
+import { parseEventReference } from "./eventReference.service.js";
 
 const normalizePhone = (phone) => String(phone || "").trim();
 const KENYA_PHONE_REGEX = /^\+254\d{9}$/;
@@ -38,6 +39,7 @@ export const initiateDeposit = async ({ userId, phone, amount, channel = "STK", 
         channel,
         status: "INITIATED",
         userId,
+        operatingMode: parseEventReference(externalRef)?.operatingMode || null,
         phone: normalizedPhone,
         amount: depositAmount,
         currency: "KES",
@@ -57,7 +59,7 @@ export const confirmDeposit = async ({
     applyWalletCredit = true,
     recordLiabilityLedger = true
 }) => {
-    return runInTransaction(async (session) => {
+    return runInRequiredTransaction(async (session) => {
         let paymentTransactionQuery = PaymentTransaction.findById(paymentTransactionId);
         if (session) {
             paymentTransactionQuery = paymentTransactionQuery.session(session);

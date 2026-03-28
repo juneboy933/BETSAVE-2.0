@@ -2,10 +2,11 @@ import PaymentTransaction from "../database/models/paymentTransaction.model.js";
 import Wallet from "../database/models/wallet.model.js";
 import WithdrawalRequest from "../database/models/withdrawalRequest.model.js";
 import { postLedger } from "./postLedger.service.js";
-import { runInTransaction } from "./databaseSession.service.js";
+import { runInRequiredTransaction } from "./databaseSession.service.js";
 import {
     getLiveWithdrawalMinBalanceKes
 } from "./withdrawalEligibility.service.js";
+import { buildEventExternalRef, normalizeOperatingMode } from "./eventReference.service.js";
 
 const KENYA_PHONE_REGEX = /^\+254\d{9}$/;
 
@@ -26,6 +27,29 @@ const validateAmount = (amount) => {
 const buildReserveEventId = (withdrawalRequestId) => `WITHDRAWAL_${withdrawalRequestId}_RESERVE`;
 const buildDisburseEventId = (withdrawalRequestId) => `WITHDRAWAL_${withdrawalRequestId}_DISBURSE`;
 const buildReverseEventId = (withdrawalRequestId) => `WITHDRAWAL_${withdrawalRequestId}_REVERSE`;
+
+const buildWithdrawalLedgerReference = ({
+    withdrawalRequestId,
+    operatingMode,
+    partnerName = null,
+    stage
+}) => {
+    const normalizedStage = String(stage || "").trim().toUpperCase() || "RESERVE";
+    const normalizedOperatingMode = normalizeOperatingMode(operatingMode);
+    const normalizedPartnerName = String(partnerName || "").trim();
+    const referencePartnerName =
+        normalizedPartnerName || (normalizedOperatingMode === "demo" ? "UNSCOPED" : "");
+
+    if (normalizedOperatingMode && referencePartnerName) {
+        return buildEventExternalRef({
+            partnerName: referencePartnerName,
+            operatingMode: normalizedOperatingMode,
+            eventId: `WITHDRAWAL::${withdrawalRequestId}::${normalizedStage}`
+        });
+    }
+
+    return `withdrawal_${normalizedStage.toLowerCase()}_${withdrawalRequestId}`;
+};
 
 export const createWithdrawalRequest = async ({
     userId,
@@ -53,17 +77,23 @@ export const createWithdrawalRequest = async ({
         return { paymentTransaction: existingPaymentTx, withdrawalRequest: linkedWithdrawal };
     }
 
-    const wallet = await Wallet.findOne({ userId }).lean();
-    const currentBalance = Number(wallet?.balance || 0);
     const policy = withdrawalPolicy && typeof withdrawalPolicy === "object" ? withdrawalPolicy : null;
     const context = paymentContext && typeof paymentContext === "object" ? paymentContext : null;
     const operatingMode = String(policy?.operatingMode || "demo").trim().toLowerCase() === "live"
         ? "live"
         : "demo";
+    const availableBalanceFromPolicy = Number(policy?.availableBalance);
+    const wallet = Number.isFinite(availableBalanceFromPolicy)
+        ? null
+        : await Wallet.findOne({ userId }).lean();
+    const currentBalance = Number.isFinite(availableBalanceFromPolicy)
+        ? Math.max(0, availableBalanceFromPolicy)
+        : Number(wallet?.balance || 0);
     const liveMinBalanceKes = parsePositiveNumber(
         policy?.liveMinBalanceKes,
         getLiveWithdrawalMinBalanceKes()
     );
+    const scopedPartnerName = String(context?.partnerName || policy?.partnerNameScope || "").trim() || null;
 
     if (policy?.eligible === false) {
         throw new Error(String(policy.denialReason || "Withdrawal is not eligible"));
@@ -77,7 +107,7 @@ export const createWithdrawalRequest = async ({
     }
 
     try {
-        return await runInTransaction(async (session) => {
+        return await runInRequiredTransaction(async (session) => {
             const createOptions = session ? { session } : undefined;
 
             const [paymentTransaction] = await PaymentTransaction.create([{
@@ -91,6 +121,7 @@ export const createWithdrawalRequest = async ({
                     String(context?.requestedByType || "").trim().toUpperCase() === "PARTNER"
                         ? "PARTNER"
                         : "USER",
+                operatingMode,
                 phone: normalizedPhone,
                 amount: withdrawalAmount,
                 currency: "KES",
@@ -107,30 +138,38 @@ export const createWithdrawalRequest = async ({
             }], createOptions);
 
             const reserveEventId = buildReserveEventId(withdrawalRequest._id);
+            const reserveReference = buildWithdrawalLedgerReference({
+                withdrawalRequestId: withdrawalRequest._id,
+                operatingMode,
+                partnerName: scopedPartnerName,
+                stage: "RESERVE"
+            });
             await postLedger({
                 userId,
                 eventId: reserveEventId,
-                reference: `withdrawal_reserve_${withdrawalRequest._id}`,
+                reference: reserveReference,
                 entries: [
                     {
                         eventId: reserveEventId,
                         account: "USER_WALLET_LIABILITY",
-                        amount: -withdrawalAmount
+                        amount: -withdrawalAmount,
+                        reference: reserveReference
                     },
                     {
                         eventId: reserveEventId,
                         account: "WITHDRAWAL_PENDING",
-                        amount: withdrawalAmount
+                        amount: withdrawalAmount,
+                        reference: reserveReference
                     }
                 ],
-                walletDelta: -withdrawalAmount,
+                walletDelta: operatingMode === "live" ? -withdrawalAmount : 0,
                 idempotencyQuery: {
                     eventId: reserveEventId,
                     userId,
                     account: "WITHDRAWAL_PENDING"
                 },
                 checkpointAccount: "WITHDRAWAL_PENDING",
-                enforceNonNegativeBalance: true,
+                enforceNonNegativeBalance: operatingMode === "live",
                 session
             });
 
@@ -171,7 +210,7 @@ export const createWithdrawalRequest = async ({
 };
 
 export const markWithdrawalDisbursed = async ({ withdrawalRequestId, providerRequestId = null, providerTransactionId = null, externalRef = null, rawCallback = null }) => {
-    return runInTransaction(async (session) => {
+    return runInRequiredTransaction(async (session) => {
         let withdrawalRequestQuery = WithdrawalRequest.findById(withdrawalRequestId);
         if (session) {
             withdrawalRequestQuery = withdrawalRequestQuery.session(session);
@@ -244,7 +283,7 @@ export const markWithdrawalDisbursed = async ({ withdrawalRequestId, providerReq
 };
 
 export const markWithdrawalFailed = async ({ withdrawalRequestId, failureReason, rawCallback = null }) => {
-    return runInTransaction(async (session) => {
+    return runInRequiredTransaction(async (session) => {
         let withdrawalRequestQuery = WithdrawalRequest.findById(withdrawalRequestId);
         if (session) {
             withdrawalRequestQuery = withdrawalRequestQuery.session(session);
@@ -269,23 +308,31 @@ export const markWithdrawalFailed = async ({ withdrawalRequestId, failureReason,
         const isReserved = withdrawalRequest.status === "RESERVED";
         if (isReserved) {
             const reverseEventId = buildReverseEventId(withdrawalRequest._id);
+            const reverseReference = buildWithdrawalLedgerReference({
+                withdrawalRequestId: withdrawalRequest._id,
+                operatingMode: paymentTransaction.operatingMode,
+                partnerName: paymentTransaction.partnerName,
+                stage: "REVERSE"
+            });
             await postLedger({
                 userId: withdrawalRequest.userId,
                 eventId: reverseEventId,
-                reference: `withdrawal_reverse_${withdrawalRequest._id}`,
+                reference: reverseReference,
                 entries: [
                     {
                         eventId: reverseEventId,
                         account: "WITHDRAWAL_PENDING",
-                        amount: -withdrawalRequest.amount
+                        amount: -withdrawalRequest.amount,
+                        reference: reverseReference
                     },
                     {
                         eventId: reverseEventId,
                         account: "USER_WALLET_LIABILITY",
-                        amount: withdrawalRequest.amount
+                        amount: withdrawalRequest.amount,
+                        reference: reverseReference
                     }
                 ],
-                walletDelta: withdrawalRequest.amount,
+                walletDelta: paymentTransaction.operatingMode === "live" ? withdrawalRequest.amount : 0,
                 idempotencyQuery: {
                     eventId: reverseEventId,
                     userId: withdrawalRequest.userId,

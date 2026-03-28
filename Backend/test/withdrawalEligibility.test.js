@@ -18,6 +18,26 @@ test("demo withdrawals stay eligible when there is no live wallet activity", () 
     assert.equal(result.denialReason, null);
 });
 
+test("demo withdrawals use attributed demo balance instead of the live wallet balance", () => {
+    const result = evaluateWithdrawalEligibilitySnapshot({
+        currentBalance: 500,
+        availableBalance: 120,
+        walletBalance: 500,
+        demoAttributedBalance: 120,
+        hasLiveWalletActivity: false,
+        liveAutoSavingsLinks: [],
+        now: NOW,
+        preferredOperatingMode: "demo",
+        partnerNameScope: "Partner Demo"
+    });
+
+    assert.equal(result.operatingMode, "demo");
+    assert.equal(result.availableBalance, 120);
+    assert.equal(result.walletBalance, 500);
+    assert.equal(result.demoAttributedBalance, 120);
+    assert.equal(result.partnerNameScope, "Partner Demo");
+});
+
 test("live withdrawals are blocked when balance is below the configured threshold", () => {
     const result = evaluateWithdrawalEligibilitySnapshot({
         currentBalance: 80,

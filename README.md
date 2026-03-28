@@ -106,7 +106,7 @@ Admin access routes:
 - Wallet balances are stored in `Wallet.balance`.
 - Each wallet-affecting flow posts balanced ledger entries.
 - Ledger writes are deduplicated with per-entry idempotency keys.
-- Production money flows expect MongoDB transaction support from a replica set or mongos deployment.
+- Production money flows require MongoDB transaction support from a replica set or mongos deployment. Betsave now fails closed for ledger-affecting money operations when transactions are unavailable.
 
 ## Demo vs Live
 
@@ -114,7 +114,7 @@ Admin access routes:
 - Demo event collection can still trigger real STK collection, callback handling, ledger writes, and payment records when Daraja collection is configured.
 - Demo-mode ledger exposure is intended for demo analytics and demo partner views only.
 - Demo mode does not increase the user's live spendable wallet balance in `Wallet.balance`.
-- Demo withdrawals are allowed whenever the attributed wallet balance is sufficient.
+- Demo withdrawals are allowed whenever the attributed demo balance is sufficient.
 - Live withdrawals are allowed only when the wallet balance is at least `KES 100` and the user has had live auto-savings enabled for the configured maturity window, currently `90` days by default.
 - Admin dashboards can switch between `demo` and `live` to inspect each slice independently.
 
@@ -249,3 +249,4 @@ docker compose -f docker-compose.prod.yml down -v
 - Existing admins issue invitation codes from the admin dashboard Access view and send those codes to new admins through a secure out-of-band channel.
 - Only the primary admin created during bootstrap can issue, view, or revoke admin invitation codes.
 - Use `INTEGRATION.md` as the implementation guide for partner backend teams.
+- Run `npm run migrate:event-indexes` before deploying the new event idempotency model so demo/live events no longer collide on the same `(partnerName, eventId)` pair.

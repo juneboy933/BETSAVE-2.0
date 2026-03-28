@@ -1,6 +1,6 @@
 import Ledger from "../database/models/ledger.model.js";
 import Wallet from "../database/models/wallet.model.js";
-import { runInTransaction } from "./databaseSession.service.js";
+import { runInRequiredTransaction } from "./databaseSession.service.js";
 
 const EPSILON = 0.000001;
 
@@ -63,17 +63,6 @@ export const postLedger = async ({
                 }
             }
 
-            let currentWalletQuery = Wallet.findOne({ userId }).select("balance");
-            if (session) {
-                currentWalletQuery = currentWalletQuery.session(session);
-            }
-
-            const currentWallet = await currentWalletQuery;
-            const currentBalance = Number(currentWallet?.balance || 0);
-            if (enforceNonNegativeBalance && currentBalance + normalizedWalletDelta < -EPSILON) {
-                throw new Error("Insufficient wallet balance");
-            }
-
             const docsToInsert = entries.map((entry) => ({
                 eventId: entry.eventId || eventId,
                 userId,
@@ -105,16 +94,26 @@ export const postLedger = async ({
                 walletUpdate.$inc = { balance: normalizedWalletDelta };
             }
 
+            const walletFilter = { userId };
+            const requiresExistingBalance = enforceNonNegativeBalance && normalizedWalletDelta < 0;
+            if (requiresExistingBalance) {
+                walletFilter.balance = { $gte: Math.abs(normalizedWalletDelta) };
+            }
+
             const wallet = await Wallet.findOneAndUpdate(
-                { userId },
+                walletFilter,
                 walletUpdate,
                 {
                     ...(session ? { session } : {}),
-                    upsert: true,
+                    upsert: !requiresExistingBalance,
                     returnDocument: "after",
                     setDefaultsOnInsert: true
                 }
             );
+
+            if (!wallet) {
+                throw new Error("Insufficient wallet balance");
+            }
 
             return {
                 wallet,
@@ -128,7 +127,7 @@ export const postLedger = async ({
             return await execute(providedSession);
         }
 
-        return await runInTransaction(execute, { label: "post-ledger" });
+        return await runInRequiredTransaction(execute, { label: "post-ledger" });
     } catch (error) {
         if (isDuplicateLedgerError(error)) {
             const existingWallet = await Wallet.findOne({ userId });

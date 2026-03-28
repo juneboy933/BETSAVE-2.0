@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { resolvePartnerSigningSecret } from './partnerSecret.service.js';
 import { recordOperationalLogSafe } from './operationalLog.service.js';
+import { buildPartnerWebhookSignaturePayload } from './partnerWebhookSignature.service.js';
 
 export const sendpartnerWebhook = async ({ partnerName, payload }) => {
     try {
@@ -29,7 +30,12 @@ export const sendpartnerWebhook = async ({ partnerName, payload }) => {
         }
 
         const timestamp = Date.now().toString();
-        const signaturePayload = `${timestamp}${JSON.stringify(payload)}`;
+        const signaturePayload = buildPartnerWebhookSignaturePayload({
+            timestamp,
+            method: "POST",
+            webhookUrl: partner.webhookUrl,
+            payload
+        });
         const signature = crypto.createHmac("sha256", signingSecret).update(signaturePayload).digest('hex');
 
         await axios.post(partner.webhookUrl, payload, {

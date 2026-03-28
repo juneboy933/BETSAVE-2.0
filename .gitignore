@@ -32,3 +32,4 @@ Thumbs.db
 # local generated files
 *.out.log
 *.err.log
+Backend/.npm-cache/
