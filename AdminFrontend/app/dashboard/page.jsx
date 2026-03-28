@@ -9,6 +9,15 @@ import { Pie } from "react-chartjs-2";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
+const getStatusChartColor = (status) => {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "PROCESSED") return "#22c55e";
+  if (normalized === "FAILED") return "#ef4444";
+  if (normalized === "PROCESSING") return "#f59e0b";
+  if (normalized === "PENDING") return "#94a3b8";
+  return "#64748b";
+};
+
 export default function AdminDashboardOverview() {
   const [metrics, setMetrics] = useState(null);
   const [eventByStatus, setEventByStatus] = useState([]);
@@ -106,7 +115,7 @@ export default function AdminDashboardOverview() {
                 datasets: [
                   {
                     data: eventByStatus.map((r) => r.count),
-                    backgroundColor: ["#34d399", "#f87171", "#94a3b8", "#fbbf24"]
+                    backgroundColor: eventByStatus.map((r) => getStatusChartColor(r._id))
                   }
                 ]
               }}
