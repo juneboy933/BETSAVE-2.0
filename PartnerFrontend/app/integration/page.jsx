@@ -23,7 +23,7 @@ export default function IntegrationPage() {
           </p>
           <div className="mt-4 rounded-xl bg-slate-100 p-3 font-mono text-xs">
             <p className="mb-2 font-semibold text-slate-700">Dashboard Access</p>
-            <p className="mb-3 break-all rounded bg-white px-2 py-1 text-slate-900">Session cookie only</p>
+            <p className="mb-3 break-all rounded bg-white px-2 py-1 text-slate-900">Session cookie plus in-tab bearer fallback</p>
             <p className="mb-2 font-semibold text-slate-700">Integration Signing</p>
             <p className="break-all rounded bg-white px-2 py-1 text-slate-900">Server-to-server only</p>
           </div>

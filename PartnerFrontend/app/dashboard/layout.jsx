@@ -221,7 +221,7 @@ export default function PartnerDashboardLayout({ children }) {
               </button>
             </div>
             <p className="mt-4 text-sm leading-6 text-slate-300">
-              Dashboard access uses the partner session cookie. Demo records stay visible only in demo mode, while signed credentials stay reserved for backend integrations.
+              Dashboard access uses the partner session cookie with an in-tab bearer fallback. Demo records stay visible only in demo mode, while signed credentials stay reserved for backend integrations.
             </p>
             {modeError ? <p className="mt-3 text-sm font-semibold text-rose-300">{modeError}</p> : null}
           </div>

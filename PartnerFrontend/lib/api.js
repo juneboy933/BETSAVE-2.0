@@ -2,6 +2,7 @@
 
 const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 const PARTNER_SESSION_FLAG = "partner_session_active";
+const PARTNER_SESSION_TOKEN_KEY = "partner_session_token";
 const PARTNER_RATE_LIMIT_BACKOFF_MS = 30000;
 let partnerDashboardRateLimitedUntil = 0;
 const getBrowserOrigin = () => (typeof window !== "undefined" ? window.location.origin : "");
@@ -26,14 +27,27 @@ export const setApiBase = (value) => {
 let partnerToken = "";
 
 export const setPartnerToken = (token) => {
-  partnerToken = "";
-  markPartnerSessionActive();
+  partnerToken = String(token || "").trim();
+  if (canUseSessionStorage()) {
+    if (partnerToken) {
+      sessionStorage.setItem(PARTNER_SESSION_TOKEN_KEY, partnerToken);
+    } else {
+      sessionStorage.removeItem(PARTNER_SESSION_TOKEN_KEY);
+    }
+  }
+  if (partnerToken) {
+    markPartnerSessionActive();
+  }
 };
 export const markPartnerSessionActive = () => {
   if (!canUseSessionStorage()) return;
   sessionStorage.setItem(PARTNER_SESSION_FLAG, "1");
 };
-export const getPartnerToken = () => partnerToken;
+export const getPartnerToken = () => {
+  if (partnerToken) return partnerToken;
+  if (!canUseSessionStorage()) return "";
+  return sessionStorage.getItem(PARTNER_SESSION_TOKEN_KEY) || "";
+};
 export const hasPartnerSession = () =>
   Boolean(getPartnerToken()) || (canUseSessionStorage() && sessionStorage.getItem(PARTNER_SESSION_FLAG) === "1");
 
@@ -42,12 +56,23 @@ const isPartnerDashboardRequest = (path) => {
   return normalizedPath.startsWith("/api/v1/dashboard/partner/") || normalizedPath.startsWith("/api/v1/partners/mode");
 };
 
-const sanitizePartnerHeaders = (headers) => {
+const buildPartnerHeaders = (path, headers) => {
   const normalizedHeaders = new Headers(headers || {});
-  normalizedHeaders.delete("Authorization");
   normalizedHeaders.delete("x-api-key");
   normalizedHeaders.delete("x-signature");
   normalizedHeaders.delete("x-timestamp");
+
+  if (isPartnerDashboardRequest(path)) {
+    const token = getPartnerToken();
+    if (token) {
+      normalizedHeaders.set("Authorization", `Bearer ${token}`);
+    } else {
+      normalizedHeaders.delete("Authorization");
+    }
+  } else {
+    normalizedHeaders.delete("Authorization");
+  }
+
   return normalizedHeaders;
 };
 
@@ -65,7 +90,7 @@ export async function partnerRequest(path, options = {}) {
   const response = await fetch(buildRequestUrl(path), {
     credentials: "include",
     ...options,
-    headers: sanitizePartnerHeaders(options.headers)
+    headers: buildPartnerHeaders(path, options.headers)
   });
   return parseResponse(response, { isDashboardRequest, response });
 }
@@ -93,6 +118,7 @@ export const clearPartnerCreds = () => {
   partnerToken = "";
   if (canUseSessionStorage()) {
     sessionStorage.removeItem(PARTNER_SESSION_FLAG);
+    sessionStorage.removeItem(PARTNER_SESSION_TOKEN_KEY);
   }
   if (!canUseStorage()) return;
   localStorage.removeItem("partner_name");
@@ -140,7 +166,7 @@ export async function registerPartnerAuth({ name, email, password, webhookUrl })
     })
   });
 
-  setPartnerToken("");
+  setPartnerToken(result.token || "");
 
   // Store partner info
   if (result.partner?.name) {
@@ -171,7 +197,7 @@ export async function loginPartnerAuth({ email, password }) {
     })
   });
 
-  setPartnerToken("");
+  setPartnerToken(result.token || "");
 
   // Store partner info if returned
   if (result.partner?.name) {

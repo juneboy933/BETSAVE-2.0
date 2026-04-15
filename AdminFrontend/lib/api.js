@@ -3,6 +3,7 @@
 const DEFAULT_API = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 const DEFAULT_ADMIN_MODE = "live";
 const ADMIN_SESSION_FLAG = "admin_session_active";
+const ADMIN_SESSION_TOKEN_KEY = "admin_session_token";
 const ADMIN_RATE_LIMIT_BACKOFF_MS = 30000;
 let adminDashboardToken = ""; // in-memory only; browser session auth relies on httpOnly cookies
 let adminDashboardRateLimitedUntil = 0;
@@ -22,9 +23,20 @@ export const setApiBase = (value) => {
   if (!canUseStorage()) return;
   localStorage.setItem("admin_api_base", normalizeApiBase(value));
 };
-export const getAdminToken = () => adminDashboardToken;
+export const getAdminToken = () => {
+  if (adminDashboardToken) return adminDashboardToken;
+  if (!canUseSessionStorage()) return "";
+  return sessionStorage.getItem(ADMIN_SESSION_TOKEN_KEY) || "";
+};
 export const setAdminToken = (token) => {
-  adminDashboardToken = "";
+  adminDashboardToken = String(token || "");
+  if (canUseSessionStorage()) {
+    if (adminDashboardToken) {
+      sessionStorage.setItem(ADMIN_SESSION_TOKEN_KEY, adminDashboardToken);
+    } else {
+      sessionStorage.removeItem(ADMIN_SESSION_TOKEN_KEY);
+    }
+  }
   markAdminSessionActive();
 };
 export const markAdminSessionActive = () => {
@@ -46,6 +58,7 @@ export const clearAdminToken = () => {
   adminDashboardToken = "";
   if (canUseSessionStorage()) {
     sessionStorage.removeItem(ADMIN_SESSION_FLAG);
+    sessionStorage.removeItem(ADMIN_SESSION_TOKEN_KEY);
   }
   if (canUseStorage()) {
     localStorage.removeItem("admin_operating_mode");
@@ -70,9 +83,14 @@ const withAdminOperatingMode = (path) => {
 
 const isAdminDashboardRequest = (path) => String(path || "").startsWith("/api/v1/dashboard/admin/");
 
-const sanitizeHeaders = (headers) => {
+const buildAdminHeaders = (path, headers) => {
   const normalizedHeaders = new Headers(headers || {});
-  normalizedHeaders.delete("x-admin-token");
+  if (isAdminDashboardRequest(path)) {
+    const token = getAdminToken();
+    if (token) {
+      normalizedHeaders.set("x-admin-token", token);
+    }
+  }
   return normalizedHeaders;
 };
 
@@ -91,7 +109,7 @@ export async function request(path, options = {}) {
   const response = await fetch(buildRequestUrl(resolvedPath), {
     credentials: "include",
     ...options,
-    headers: sanitizeHeaders(options.headers)
+    headers: buildAdminHeaders(resolvedPath || path, options.headers)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

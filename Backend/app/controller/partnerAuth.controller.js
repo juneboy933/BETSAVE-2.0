@@ -1,7 +1,6 @@
 import PartnerAuth from "../../database/models/partnerAuth.model.js";
 import Partner from "../../database/models/partner.model.js";
 import {
-    decryptPartnerApiSecret,
     encryptPartnerApiSecret,
     hashPassword,
     generateSalt,
@@ -132,12 +131,13 @@ export const registerPartnerAuth = async (req, res) => {
                 email: normalizedEmail,
                 operatingMode: partner.operatingMode
             },
+            token,
             apiCredentials: {
                 apiKey,
                 apiSecret
             },
             securityNotice:
-                "⚠️ Save your API Key and Secret now. We will not show them again. Store them securely on your backend for signing requests."
+                "Save your API Key and Secret now. We will not show them again. Store them securely on your backend for signing requests."
         });
     } catch (error) {
         console.error("registerPartnerAuth error:", error.message);
@@ -182,6 +182,13 @@ export const loginPartnerAuth = async (req, res) => {
             });
         }
 
+        if (!partnerAuth.partnerId || partnerAuth.partnerId.status !== "ACTIVE") {
+            return res.status(403).json({
+                status: "FAILED",
+                reason: "Partner account is suspended"
+            });
+        }
+
         // verify password
         const passwordHash = hashPassword(password, partnerAuth.passwordSalt);
         if (passwordHash !== partnerAuth.passwordHash) {
@@ -210,7 +217,8 @@ export const loginPartnerAuth = async (req, res) => {
                 name: partnerAuth.partnerId.name,
                 email: normalizedEmail,
                 operatingMode: partnerAuth.partnerId.operatingMode || "demo"
-            }
+            },
+            token
         });
     } catch (error) {
         console.error("loginPartnerAuth error:", error.message);
@@ -260,7 +268,8 @@ export const refreshPartnerToken = async (req, res) => {
 
         return res.json({
             status: "SUCCESS",
-            refreshed: true
+            refreshed: true,
+            token: newToken
         });
     } catch (error) {
         console.error("refreshPartnerToken error:", error.message);

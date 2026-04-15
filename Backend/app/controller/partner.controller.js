@@ -4,6 +4,7 @@ import Partner from "../../database/models/partner.model.js";
 import PartnerUser from "../../database/models/partnerUser.model.js";
 import User from "../../database/models/user.model.js";
 import { sendOTP, verifyOTP } from "../../service/otp.service.js";
+import { resolvePartnerSigningSecret } from "../../service/partnerSecret.service.js";
 import crypto from "crypto";
 import { sanitizeStructuredData, summarizeUrlForDisplay } from "../../service/redaction.service.js";
 
@@ -72,7 +73,7 @@ export const loginPartner = async (req, res) => {
             });
         }
 
-        const partner = await Partner.findOne({ apiKey }).select("_id name apiKey apiSecret status webhookUrl operatingMode");
+        const partner = await Partner.findOne({ apiKey }).select("_id name apiKey +apiSecret +apiSecretEncrypted status webhookUrl operatingMode");
         if (!partner) {
             return res.status(401).json({
                 status: "FAILED",
@@ -87,7 +88,15 @@ export const loginPartner = async (req, res) => {
             });
         }
 
-        const expected = Buffer.from(partner.apiSecret, "utf8");
+        const signingSecret = resolvePartnerSigningSecret(partner);
+        if (!signingSecret) {
+            return res.status(401).json({
+                status: "FAILED",
+                reason: "Partner credentials are unavailable"
+            });
+        }
+
+        const expected = Buffer.from(signingSecret, "utf8");
         const provided = Buffer.from(apiSecret, "utf8");
         const valid =
             expected.length === provided.length &&
@@ -142,7 +151,7 @@ export const getPartnerCredentials = async (req, res) => {
         }
 
         const partner = await Partner.findById(req.partner.id)
-            .select("_id name apiKey apiSecret status operatingMode");
+            .select("_id name apiKey +apiSecret +apiSecretEncrypted status operatingMode");
 
         if (!partner) {
             return res.status(404).json({
@@ -158,11 +167,19 @@ export const getPartnerCredentials = async (req, res) => {
             });
         }
 
+        const signingSecret = resolvePartnerSigningSecret(partner);
+        if (!signingSecret) {
+            return res.status(500).json({
+                status: "FAILED",
+                reason: "Partner credentials are unavailable"
+            });
+        }
+
         return res.json({
             status: "SUCCESS",
             credentials: {
                 apiKey: partner.apiKey,
-                apiSecret: partner.apiSecret
+                apiSecret: signingSecret
             },
             operatingMode: partner.operatingMode || "demo",
             securityNotice: CREDENTIALS_SECURITY_NOTICE

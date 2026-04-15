@@ -1,4 +1,5 @@
 const isProduction = () => String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
+const getSameSite = () => (isProduction() ? "None" : "Lax");
 
 export const parseCookies = (cookieHeader) => {
     const header = String(cookieHeader || "").trim();
@@ -28,7 +29,7 @@ export const buildSessionCookie = ({ name, value, maxAgeSeconds }) => {
         `${name}=${encodeURIComponent(String(value || ""))}`,
         "Path=/",
         "HttpOnly",
-        "SameSite=Lax",
+        `SameSite=${getSameSite()}`,
         `Max-Age=${Math.max(0, Number(maxAgeSeconds) || 0)}`
     ];
 
@@ -40,5 +41,4 @@ export const buildSessionCookie = ({ name, value, maxAgeSeconds }) => {
 };
 
 export const buildClearedSessionCookie = (name) =>
-    `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${isProduction() ? "; Secure" : ""}`;
-
+    `${name}=; Path=/; HttpOnly; SameSite=${getSameSite()}; Max-Age=0${isProduction() ? "; Secure" : ""}`;
