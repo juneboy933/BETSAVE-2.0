@@ -82,10 +82,21 @@ const withAdminOperatingMode = (path) => {
 };
 
 const isAdminDashboardRequest = (path) => String(path || "").startsWith("/api/v1/dashboard/admin/");
+const isAdminProtectedAuthRequest = (path) => {
+  const normalizedPath = String(path || "");
+  if (!normalizedPath.startsWith("/api/v1/admin/auth/")) {
+    return false;
+  }
+
+  return !(
+    normalizedPath.startsWith("/api/v1/admin/auth/login") ||
+    normalizedPath.startsWith("/api/v1/admin/auth/register-with-invitation")
+  );
+};
 
 const buildAdminHeaders = (path, headers) => {
   const normalizedHeaders = new Headers(headers || {});
-  if (isAdminDashboardRequest(path)) {
+  if (isAdminDashboardRequest(path) || isAdminProtectedAuthRequest(path)) {
     const token = getAdminToken();
     if (token) {
       normalizedHeaders.set("x-admin-token", token);
