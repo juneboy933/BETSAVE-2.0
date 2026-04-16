@@ -56,13 +56,27 @@ const isPartnerDashboardRequest = (path) => {
   return normalizedPath.startsWith("/api/v1/dashboard/partner/") || normalizedPath.startsWith("/api/v1/partners/mode");
 };
 
+const shouldAttachPartnerSession = (path) => {
+  const normalizedPath = String(path || "");
+  if (isPartnerDashboardRequest(normalizedPath)) {
+    return true;
+  }
+
+  if (!normalizedPath.startsWith("/api/v1/partners/")) {
+    return false;
+  }
+
+  return !normalizedPath.startsWith("/api/v1/partners/auth/register")
+    && !normalizedPath.startsWith("/api/v1/partners/auth/login");
+};
+
 const buildPartnerHeaders = (path, headers) => {
   const normalizedHeaders = new Headers(headers || {});
   normalizedHeaders.delete("x-api-key");
   normalizedHeaders.delete("x-signature");
   normalizedHeaders.delete("x-timestamp");
 
-  if (isPartnerDashboardRequest(path)) {
+  if (shouldAttachPartnerSession(path)) {
     const token = getPartnerToken();
     if (token) {
       normalizedHeaders.set("Authorization", `Bearer ${token}`);
